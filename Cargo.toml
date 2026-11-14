@@ -1,0 +1,9 @@
+[package]
+name = "lore"
+version = "0.0.1"
+edition = "2024"
+description = "결정 기록을 코드 옆에 두고 조회하는 AI Native SDLC 도구"
+license = "MIT"
+repository = "https://github.com/Just-gomin/lore"
+
+[dependencies]

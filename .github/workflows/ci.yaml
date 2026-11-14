@@ -1,0 +1,29 @@
+name: "CI"
+
+on:
+  pull_request:
+    branches:
+      - main
+  push:
+    branches:
+      - main
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Repository Checkout"
+        uses: actions/checkout@v6
+
+      - name: "Rust 버전 확인"
+        run: rustc --version && cargo --version
+
+      - name: "Format"
+        run: cargo fmt --all --check
+
+      - name: "Lint"
+        run: cargo clippy --all-targets --locked -- -D warnings
+
+      - name: "Test"
+        run: cargo test --locked
