@@ -3,7 +3,11 @@
 //! 이 크레이트는 네트워크와 LLM 없이 동작한다. 같은 입력에는 같은 출력을 낸다.
 
 pub mod cli;
+pub mod config;
+pub mod error;
+pub mod frontmatter;
 pub mod output;
+pub mod source;
 
 use cli::{Invocation, ParseError};
 use output::Outcome;
