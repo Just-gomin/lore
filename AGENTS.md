@@ -33,12 +33,15 @@
 | `src/db.rs`          | SQLite 스키마와 쓰기                                 |
 | `src/index.rs`       | `docs/INDEX.md` 본문 만들기                          |
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
+| `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
+| `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
 | `tests/index.rs`     | 고정 예제로 `docs/INDEX.md` 생성을 확인하는 테스트   |
 | `tests/why.rs`       | 고정 예제로 `lore why` 조회를 확인하는 테스트        |
+| `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |
 
