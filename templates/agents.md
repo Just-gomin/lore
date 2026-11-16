@@ -19,7 +19,7 @@ lore why <파일 경로 | ID>
 lore impact <파일 경로 | ID> --hop=2
 ```
 
-`lore why`는 요약 목록부터 읽고, 필요한 기록만 `--depth doc`, 원본까지 필요하면 `--depth source`로 내려갑니다. 모든 명령은 JSON을 출력합니다. 사람에게 보여줄 때만 `--for-human`을 붙입니다.
+`lore why`는 요약 목록부터 읽고, 필요한 기록만 `--depth doc`, 원본까지 필요하면 `--depth source`로 내려갑니다. `lore impact`의 홉은 기능 사이를 건너는 횟수이며, 대상에 기대는(대상을 `depends_on`으로 가리키는) 기능 쪽으로 넓힙니다. 대상이 기대는 기능은 나오지 않습니다. 모든 명령은 JSON을 출력합니다. 사람에게 보여줄 때만 `--for-human`을 붙입니다.
 
 ### 2. 관련 자료 묻기
 
@@ -34,6 +34,8 @@ lore add source --from <JSON 파일>
 ```
 
 입력 JSON에는 `title`, `slug`(영문), `kind`, `channel`, `origin`, `origin_version`, `occurred_at`, `body`를 넣습니다. `channel`은 `lore.config.yaml`의 채널 `id`와 같아야 합니다. 민감 채널은 `body`를 빼고 넘깁니다.
+
+정제 기준과 입력 예시는 `lore-source` 스킬(`.claude/skills/lore-source/SKILL.md`)에 있습니다.
 
 ### 3. 설계 승인
 
@@ -52,6 +54,8 @@ lore add source --from <JSON 파일>
 ### 5. 기록
 
 이 작업으로 새로 정한 것이 있으면 결정 기록을 추가합니다.
+
+무엇을 기록하고 어떻게 채우는지는 `lore-record` 스킬(`.claude/skills/lore-record/SKILL.md`)에 있습니다. 스킬을 불러올 수 없는 에이전트는 그 파일을 직접 읽고 따릅니다.
 
 ```sh
 lore add decision --slug <영문 슬러그> --title <제목> --specs <스펙 ID>    # 새 결정
@@ -73,6 +77,6 @@ lore build                                                              # 본문
 ### 하지 않는 것
 
 - `docs/INDEX.md`를 손으로 고치지 않습니다. 충돌하면 `lore build`로 다시 만듭니다.
-- 디비 파일을 커밋하지 않습니다. 디비는 소스에서 다시 만들 수 있는 빌드 산출물입니다.
+- 디비 파일을 커밋하지 않습니다. 디비는 소스에서 다시 만들 수 있는 빌드 산출물이며, 조회할 때 `.lore/`에 자동으로 만들어지고 git이 무시합니다.
 - 민감 등급 채널의 내용을 소스 노트나 결정 기록에 옮겨 적지 않습니다. 제목과 링크만 남기고, 결정의 이유는 구체적인 내용을 일반화해서 씁니다.
 - 제외 등급 채널은 읽지 않습니다.

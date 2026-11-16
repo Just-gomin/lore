@@ -4,7 +4,7 @@
 
 ## 먼저 읽을 문서
 
-- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 스물아홉 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
+- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
 - [`docs/plan/stage-3.md`](docs/plan/stage-3.md): 지금 하고 있는 3단계의 작업 순서와 완료 기준입니다. 끝난 2단계는 [`stage-2.md`](docs/plan/stage-2.md)에 있습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
@@ -39,7 +39,7 @@
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
-| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정            |
+| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬      |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
@@ -48,6 +48,7 @@
 | `tests/add.rs`       | 고정 예제로 `lore add`를 확인하는 테스트             |
 | `tests/add_source.rs` | 고정 예제로 `lore add source`를 확인하는 테스트     |
 | `tests/install.rs`   | 빈 레포와 기존 파일로 `lore install`을 확인하는 테스트 |
+| `tests/skills.rs`    | 스킬과 안내문의 명령 예시가 해석되는지 확인          |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |
