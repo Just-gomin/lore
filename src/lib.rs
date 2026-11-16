@@ -13,6 +13,7 @@ pub mod graph;
 pub mod index;
 pub mod output;
 pub mod source;
+pub mod why;
 
 use std::path::Path;
 
@@ -56,6 +57,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Build => config::discover(cwd)
             .and_then(|config| build::build(&config))
             .map(|report| output::success(&report, for_human, build::render)),
+        Request::Why { target, depth } => config::discover(cwd)
+            .and_then(|config| why::why(&config, cwd, &target, depth))
+            .map(|report| output::success(&report, for_human, why::render)),
     };
     result.unwrap_or_else(|error| output::error(&error, for_human))
 }
