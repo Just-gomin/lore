@@ -33,6 +33,7 @@ fn 고정_예제의_노드와_엣지_수가_기대값과_같다() {
     let report = json(&output);
     assert_eq!(report["ok"], true);
     assert_eq!(report["db"], ".lore/lore.db");
+    assert_eq!(report["index"], "docs/INDEX.md");
     assert_eq!(
         report["nodes"],
         json!({"decision": 4, "feature": 4, "file": 7, "incident": 1, "source": 2})
