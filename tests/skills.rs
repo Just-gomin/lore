@@ -122,3 +122,26 @@ fn 소스_노트_스킬의_입력_예시는_입력_검사를_통과한다() {
     assert_eq!(examples.len(), 1);
     lore::add_source::parse_input("lore-source", &examples[0]).unwrap();
 }
+
+#[test]
+fn 설치하는_마크다운의_중첩_목록은_두_칸_들여쓰기다() {
+    // 설치한 레포의 포매터(prettier 등)가 들여쓰기를 바꾸면 스킬 해시가 어긋나
+    // 사람이 고친 스킬로 보이게 된다. prettier의 기본 형식인 두 칸으로 쓴다.
+    let mut texts: Vec<(&str, &str)> = SKILLS.to_vec();
+    texts.push(("AGENTS.md 구간", AGENTS_BODY));
+    for (name, text) in texts {
+        let mut in_code = false;
+        for (number, line) in text.lines().enumerate() {
+            if line.trim_start().starts_with("```") {
+                in_code = !in_code;
+            }
+            let indent = line.len() - line.trim_start().len();
+            let is_item = line.trim_start().starts_with("- ");
+            assert!(
+                in_code || !is_item || indent % 2 == 0 && indent <= 2,
+                "{name} {}번째 줄의 목록 들여쓰기가 두 칸이 아닙니다: {line:?}",
+                number + 1
+            );
+        }
+    }
+}
