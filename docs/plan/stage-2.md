@@ -115,6 +115,6 @@ lore why features/note/lib/notes.ts --for-human
 
 ## 끝나면
 
-- 블로그 레포에서 `lore build`, `lore why`, `lore impact`를 실제로 돌려 봅니다.
-- 쓰면서 불편했던 형식을 기획서에 반영합니다.
-- 3단계 작업 지시서를 씁니다.
+- [x] 블로그 레포에서 `lore build`, `lore why`, `lore impact`를 실제로 돌려 봅니다. 결과는 4~6번의 "확인"에 적었고, 생성한 인덱스는 블로그 PR(Just-gomin/Just-gomin.github.io#22)로 올렸습니다.
+- [x] 쓰면서 불편했던 형식을 기획서에 반영합니다. 인덱스 형식은 기획서 2장에, 나머지는 단계마다 "정한 것"에 적었습니다. 인덱스 머리 문단은 읽기 어려워 표현을 바꿨습니다.
+- [x] 3단계 작업 지시서를 씁니다: [stage-3.md](stage-3.md)

@@ -5,7 +5,7 @@
 ## 먼저 읽을 문서
 
 - [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 스물여덟 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
-- [`docs/plan/stage-2.md`](docs/plan/stage-2.md): 지금 하고 있는 2단계의 작업 순서와 완료 기준입니다.
+- [`docs/plan/stage-3.md`](docs/plan/stage-3.md): 지금 하고 있는 3단계의 작업 순서와 완료 기준입니다. 끝난 2단계는 [`stage-2.md`](docs/plan/stage-2.md)에 있습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
 
