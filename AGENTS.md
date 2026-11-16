@@ -4,7 +4,7 @@
 
 ## 먼저 읽을 문서
 
-- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 스물일곱 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
+- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 스물여덟 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
 - [`docs/plan/stage-2.md`](docs/plan/stage-2.md): 지금 하고 있는 2단계의 작업 순서와 완료 기준입니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
@@ -28,8 +28,14 @@
 | `src/config.rs`      | `lore.config.yaml` 찾기와 읽기                       |
 | `src/frontmatter.rs` | 머리말 분리와 항목 읽기                              |
 | `src/source.rs`      | 소스 폴더를 훑어 종류별로 읽고 참조를 검사           |
+| `src/git.rs`         | 추적 파일 목록, 현재 커밋, 작업 트리 상태            |
+| `src/graph.rs`       | 소스와 파일로 노드와 엣지 계산                       |
+| `src/db.rs`          | SQLite 스키마와 쓰기                                 |
+| `src/build.rs`       | `lore build`: 디비 만들기                            |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
+| `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
+| `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |
 
 ## 작업 방법
