@@ -146,7 +146,7 @@ fn render(record: &NewRecord, id: &str) -> String {
 }
 
 /// YAML에 그대로 적어도 같은 문자열로 읽히면 그대로, 아니면 따옴표로 감싼다.
-fn scalar(text: &str) -> String {
+pub(crate) fn scalar(text: &str) -> String {
     let plain = format!("k: {text}\n");
     if reads_back(&plain, |value| value.as_str() == Some(text)) {
         text.to_string()

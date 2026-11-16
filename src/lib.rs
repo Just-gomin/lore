@@ -3,6 +3,7 @@
 //! 이 크레이트는 네트워크와 LLM 없이 동작한다. 같은 입력에는 같은 출력을 낸다.
 
 pub mod add;
+pub mod add_source;
 pub mod build;
 pub mod cli;
 pub mod config;
@@ -54,6 +55,25 @@ pub fn run_in(args: &[String], cwd: &Path) -> Outcome {
     }
 }
 
+/// 입력 파일을 읽는다. 파일이 없으면 표준 입력에서 읽고 이름은 `-`이다.
+fn read_input(from: Option<&str>, cwd: &Path) -> Result<(String, String), error::LoreError> {
+    let io_error = |path: &str, error: std::io::Error| error::LoreError::Io {
+        path: path.to_string(),
+        message: error.to_string(),
+    };
+    match from {
+        Some(path) => std::fs::read_to_string(cwd.join(path))
+            .map(|text| (path.to_string(), text))
+            .map_err(|error| io_error(path, error)),
+        None => {
+            let mut text = String::new();
+            std::io::Read::read_to_string(&mut std::io::stdin(), &mut text)
+                .map_err(|error| io_error("-", error))?;
+            Ok(("-".to_string(), text))
+        }
+    }
+}
+
 fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
     let result = match request {
         Request::Pending(command) => return output::not_implemented(command, for_human),
@@ -63,6 +83,13 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Add(record) => config::discover(cwd)
             .and_then(|config| add::add(&config, &record))
             .map(|report| output::success(&report, for_human, add::render_report)),
+        Request::AddSource { from, date } => read_input(from.as_deref(), cwd)
+            .and_then(|(name, text)| add_source::parse_input(&name, &text))
+            .and_then(|input| {
+                config::discover(cwd)
+                    .and_then(|config| add_source::add_source(&config, &input, date.as_deref()))
+            })
+            .map(|report| output::success(&report, for_human, add_source::render_report)),
         Request::Impact { target, hop, edges } => config::discover(cwd)
             .and_then(|config| impact::impact(&config, cwd, &target, hop, &edges))
             .map(|report| output::success(&report, for_human, impact::render)),

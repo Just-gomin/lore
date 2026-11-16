@@ -67,6 +67,14 @@ pub enum LoreError {
     Database {
         message: String,
     },
+    /// 명령에 넘긴 입력(JSON 등)이 형식에 맞지 않다. 문제를 모아 한 번에 보고한다.
+    InvalidInput {
+        problems: Vec<Problem>,
+    },
+    /// 제외 등급 채널의 자료는 받지 않는다.
+    ExcludedChannel {
+        channel: String,
+    },
     /// 만들려는 기록의 ID를 이미 쓰고 있다.
     IdExists {
         id: String,
@@ -112,6 +120,17 @@ impl fmt::Display for LoreError {
             LoreError::Io { path, message } => write!(f, "{path}: {message}"),
             LoreError::Git { message } => write!(f, "git: {message}"),
             LoreError::Database { message } => write!(f, "디비: {message}"),
+            LoreError::InvalidInput { problems } => {
+                write!(f, "입력에서 문제 {}개를 찾았습니다.", problems.len())?;
+                for problem in problems {
+                    write!(f, "\n  {problem}")?;
+                }
+                Ok(())
+            }
+            LoreError::ExcludedChannel { channel } => write!(
+                f,
+                "채널 '{channel}'은 제외 등급이라 소스 노트로 만들지 않습니다."
+            ),
             LoreError::IdExists { id, path } => write!(
                 f,
                 "ID '{id}'를 이미 씁니다({path}). 슬러그나 날짜를 바꾸세요."

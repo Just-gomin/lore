@@ -7,3 +7,9 @@ channels:
   - id: github
     tool: lore-connector-github
     sensitivity: normal
+  - id: kakaotalk
+    tool: agent
+    sensitivity: sensitive
+  - id: hr
+    tool: agent
+    sensitivity: excluded
