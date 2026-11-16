@@ -36,9 +36,9 @@ lore why features/note/lib/notes.ts --for-human
 
 ### 1. 의존성 도입과 뼈대 교체
 
-- [ ] `clap`(인자 해석), `serde`와 `serde_json`(JSON 출력), `serde_yaml` 계열(머리말과 설정), `rusqlite`의 `bundled` 기능(SQLite)을 넣습니다.
-- [ ] `src/cli.rs`의 직접 짠 인자 해석과 `src/output.rs`의 직접 짠 JSON 출력을 위 라이브러리로 바꿉니다.
-- [ ] `Cargo.lock`을 커밋합니다.
+- [x] `clap`(인자 해석), `serde`와 `serde_json`(JSON 출력), `serde_yaml` 계열(머리말과 설정), `rusqlite`의 `bundled` 기능(SQLite)을 넣습니다.
+- [x] `src/cli.rs`의 직접 짠 인자 해석과 `src/output.rs`의 직접 짠 JSON 출력을 위 라이브러리로 바꿉니다.
+- [x] `Cargo.lock`을 커밋합니다.
 
 완료 기준: `tests/cli.rs`의 기존 테스트가 기대값을 고치지 않고 통과합니다. 출력 계약(기본 JSON, `--for-human`, 오류의 종료 코드 2)은 바뀌지 않습니다.
 

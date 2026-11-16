@@ -1,5 +1,9 @@
 //! 명령 이름과 공통 옵션을 해석한다.
 
+use std::ffi::OsString;
+
+use clap::{Arg, ArgAction, ColorChoice};
+
 /// lore가 제공하는 명령.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -74,24 +78,85 @@ pub enum Invocation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ParseError {
     UnknownCommand { name: String, for_human: bool },
+    InvalidArguments { message: String, for_human: bool },
+}
+
+const FOR_HUMAN: &str = "for-human";
+const HELP: &str = "help";
+const VERSION: &str = "version";
+
+/// clap 명령 트리. 하위 명령은 [`Command::ALL`]에서 만든다.
+///
+/// clap이 직접 만드는 도움말과 버전 출력은 끈다. 출력 형식은 `output`이 정한다.
+fn definition() -> clap::Command {
+    let subcommands = Command::ALL
+        .into_iter()
+        .map(|command| clap::Command::new(command.name()).about(command.summary()));
+
+    clap::Command::new("lore")
+        .disable_help_flag(true)
+        .disable_version_flag(true)
+        .disable_help_subcommand(true)
+        .allow_external_subcommands(true)
+        .color(ColorChoice::Never)
+        .arg(
+            Arg::new(FOR_HUMAN)
+                .long(FOR_HUMAN)
+                .global(true)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new(HELP)
+                .short('h')
+                .long(HELP)
+                .global(true)
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new(VERSION)
+                .short('V')
+                .long(VERSION)
+                .action(ArgAction::SetTrue),
+        )
+        .subcommand(clap::Command::new(HELP).hide(true))
+        .subcommands(subcommands)
 }
 
 /// 프로그램 이름을 뺀 인자를 해석한다.
 ///
-/// `--for-human`은 어느 위치에 있어도 받는다. 명령별 옵션은 아직 해석하지 않는다.
+/// `--for-human`은 어느 위치에 있어도 받는다. 명령별 옵션은 아직 없다.
 pub fn parse(args: &[String]) -> Result<Invocation, ParseError> {
-    let for_human = args.iter().any(|arg| arg == "--for-human");
-    let first = args.iter().find(|arg| arg.as_str() != "--for-human");
+    let argv = std::iter::once("lore").chain(args.iter().map(String::as_str));
+    let matches =
+        definition()
+            .try_get_matches_from(argv)
+            .map_err(|error| ParseError::InvalidArguments {
+                message: error.render().to_string().trim().to_string(),
+                // 해석에 실패했으므로 원래 인자에서 직접 찾는다.
+                for_human: args.iter().any(|arg| arg == "--for-human"),
+            })?;
 
-    match first.map(String::as_str) {
-        None | Some("help" | "--help" | "-h") => Ok(Invocation::Help { for_human }),
-        Some("--version" | "-V") => Ok(Invocation::Version { for_human }),
-        Some(name) => match Command::from_name(name) {
+    let for_human = matches.get_flag(FOR_HUMAN);
+    if matches.get_flag(VERSION) {
+        return Ok(Invocation::Version { for_human });
+    }
+    if matches.get_flag(HELP) {
+        return Ok(Invocation::Help { for_human });
+    }
+
+    match matches.subcommand() {
+        None | Some((HELP, _)) => Ok(Invocation::Help { for_human }),
+        Some((name, sub)) => match Command::from_name(name) {
             Some(command) => Ok(Invocation::Command { command, for_human }),
-            None => Err(ParseError::UnknownCommand {
-                name: name.to_string(),
-                for_human,
-            }),
+            None => {
+                // 모르는 명령 뒤의 인자는 clap이 해석하지 않고 그대로 넘긴다.
+                let trailing = sub.get_many::<OsString>("").into_iter().flatten();
+                let for_human = for_human || trailing.into_iter().any(|arg| arg == "--for-human");
+                Err(ParseError::UnknownCommand {
+                    name: name.to_string(),
+                    for_human,
+                })
+            }
         },
     }
 }
@@ -141,5 +206,43 @@ mod tests {
                 for_human: false
             })
         );
+    }
+
+    #[test]
+    fn 모르는_명령_뒤의_for_human도_받는다() {
+        assert_eq!(
+            parse(&args(&["explain", "--for-human"])),
+            Err(ParseError::UnknownCommand {
+                name: "explain".to_string(),
+                for_human: true
+            })
+        );
+    }
+
+    #[test]
+    fn 도움말과_버전_플래그를_알아본다() {
+        for flag in ["help", "--help", "-h"] {
+            assert_eq!(
+                parse(&args(&[flag])),
+                Ok(Invocation::Help { for_human: false })
+            );
+        }
+        for flag in ["--version", "-V"] {
+            assert_eq!(
+                parse(&args(&[flag, "--for-human"])),
+                Ok(Invocation::Version { for_human: true })
+            );
+        }
+    }
+
+    #[test]
+    fn 명령이_받지_않는_인자는_오류다() {
+        match parse(&args(&["build", "--nope", "--for-human"])) {
+            Err(ParseError::InvalidArguments { message, for_human }) => {
+                assert!(message.contains("--nope"), "{message}");
+                assert!(for_human);
+            }
+            other => panic!("InvalidArguments가 아니다: {other:?}"),
+        }
     }
 }

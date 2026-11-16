@@ -1,5 +1,7 @@
 //! 출력 형식. 기본은 JSON이고 `--for-human`일 때만 사람용 텍스트를 낸다.
 
+use serde::Serialize;
+
 use crate::cli::Command;
 
 /// 사용법이 잘못됐거나 아직 구현되지 않은 명령일 때의 종료 코드.
@@ -42,11 +44,57 @@ impl Outcome {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[derive(Serialize)]
+struct VersionJson {
+    ok: bool,
+    version: &'static str,
+}
+
+#[derive(Serialize)]
+struct HelpJson {
+    ok: bool,
+    version: &'static str,
+    commands: Vec<CommandJson>,
+}
+
+#[derive(Serialize)]
+struct CommandJson {
+    name: &'static str,
+    summary: &'static str,
+}
+
+#[derive(Serialize)]
+struct FailureJson<'a> {
+    ok: bool,
+    error: ErrorJson<'a>,
+}
+
+/// 오류 객체. `code`가 맨 앞에 오고 나머지 항목이 뒤따른다.
+#[derive(Serialize)]
+#[serde(tag = "code", rename_all = "snake_case")]
+enum ErrorJson<'a> {
+    NotImplemented { command: &'a str },
+    UnknownCommand { command: &'a str },
+    InvalidArguments { message: &'a str },
+}
+
+/// 출력용 구조체를 한 줄 JSON으로 바꾼다.
+fn to_json<T: Serialize>(value: &T) -> String {
+    serde_json::to_string(value).expect("출력 구조체는 항상 JSON으로 바꿀 수 있다")
+}
+
+fn failure(error: ErrorJson<'_>) -> String {
+    to_json(&FailureJson { ok: false, error })
+}
+
 pub fn version(for_human: bool) -> Outcome {
     if for_human {
         Outcome::ok(format!("lore {VERSION}"))
     } else {
-        Outcome::ok(format!(r#"{{"ok":true,"version":{}}}"#, quote(VERSION)))
+        Outcome::ok(to_json(&VersionJson {
+            ok: true,
+            version: VERSION,
+        }))
     }
 }
 
@@ -68,31 +116,27 @@ pub fn help(for_human: bool) -> Outcome {
         text.push_str("\n출력은 기본이 JSON이고, --for-human을 붙이면 사람용 텍스트입니다.");
         Outcome::ok(text)
     } else {
-        let commands: Vec<String> = Command::ALL
-            .iter()
-            .map(|command| {
-                format!(
-                    r#"{{"name":{},"summary":{}}}"#,
-                    quote(command.name()),
-                    quote(command.summary())
-                )
+        let commands = Command::ALL
+            .into_iter()
+            .map(|command| CommandJson {
+                name: command.name(),
+                summary: command.summary(),
             })
             .collect();
-        Outcome::ok(format!(
-            r#"{{"ok":true,"version":{},"commands":[{}]}}"#,
-            quote(VERSION),
-            commands.join(",")
-        ))
+        Outcome::ok(to_json(&HelpJson {
+            ok: true,
+            version: VERSION,
+            commands,
+        }))
     }
 }
 
 pub fn not_implemented(command: Command, for_human: bool) -> Outcome {
     Outcome::fail(
         for_human,
-        format!(
-            r#"{{"ok":false,"error":{{"code":"not_implemented","command":{}}}}}"#,
-            quote(command.name())
-        ),
+        failure(ErrorJson::NotImplemented {
+            command: command.name(),
+        }),
         format!("lore {}: 아직 구현되지 않았습니다.", command.name()),
     )
 }
@@ -100,33 +144,19 @@ pub fn not_implemented(command: Command, for_human: bool) -> Outcome {
 pub fn unknown_command(name: &str, for_human: bool) -> Outcome {
     Outcome::fail(
         for_human,
-        format!(
-            r#"{{"ok":false,"error":{{"code":"unknown_command","command":{}}}}}"#,
-            quote(name)
-        ),
+        failure(ErrorJson::UnknownCommand { command: name }),
         format!(
             "lore: '{name}'은(는) 없는 명령입니다. 'lore help --for-human'으로 목록을 확인하세요."
         ),
     )
 }
 
-/// 문자열을 JSON 문자열 리터럴로 바꾼다.
-fn quote(value: &str) -> String {
-    let mut out = String::with_capacity(value.len() + 2);
-    out.push('"');
-    for ch in value.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            ch if (ch as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", ch as u32)),
-            ch => out.push(ch),
-        }
-    }
-    out.push('"');
-    out
+pub fn invalid_arguments(message: &str, for_human: bool) -> Outcome {
+    Outcome::fail(
+        for_human,
+        failure(ErrorJson::InvalidArguments { message }),
+        format!("lore: {message}"),
+    )
 }
 
 #[cfg(test)]
@@ -134,12 +164,28 @@ mod tests {
     use super::*;
 
     #[test]
+    fn 오류_json은_code가_맨_앞에_온다() {
+        assert_eq!(
+            failure(ErrorJson::UnknownCommand { command: "explain" }),
+            r#"{"ok":false,"error":{"code":"unknown_command","command":"explain"}}"#
+        );
+    }
+
+    #[test]
     fn 따옴표와_제어_문자를_이스케이프한다() {
-        assert_eq!(quote("a\"b\\c\nd\u{1}"), r#""a\"b\\c\nd\u0001""#);
+        assert_eq!(
+            failure(ErrorJson::InvalidArguments {
+                message: "a\"b\\c\nd\u{1}"
+            }),
+            r#"{"ok":false,"error":{"code":"invalid_arguments","message":"a\"b\\c\nd\u0001"}}"#
+        );
     }
 
     #[test]
     fn 한글은_그대로_둔다() {
-        assert_eq!(quote("결정"), "\"결정\"");
+        assert_eq!(
+            failure(ErrorJson::NotImplemented { command: "결정" }),
+            r#"{"ok":false,"error":{"code":"not_implemented","command":"결정"}}"#
+        );
     }
 }

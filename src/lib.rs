@@ -21,5 +21,8 @@ pub fn run(args: &[String]) -> Outcome {
         Err(ParseError::UnknownCommand { name, for_human }) => {
             output::unknown_command(&name, for_human)
         }
+        Err(ParseError::InvalidArguments { message, for_human }) => {
+            output::invalid_arguments(&message, for_human)
+        }
     }
 }
