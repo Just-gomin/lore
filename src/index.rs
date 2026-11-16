@@ -21,7 +21,7 @@ pub fn render(corpus: &Corpus, docs: &str) -> String {
 
     let mut text = String::from(
         "# INDEX\n\n\
-         모든 기록의 한 줄 목록입니다. `lore build`가 만들므로 손으로 고치지 않습니다. \
+         모든 기록의 한 줄 목록입니다. `lore build`가 만드는 파일이니 손으로 고치지 마세요. \
          ID 순으로 정렬하고 스펙별로 묶습니다.\n",
     );
     let line = |doc: &Document| {
