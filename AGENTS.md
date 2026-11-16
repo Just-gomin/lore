@@ -35,7 +35,7 @@
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
 | `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
-| `src/install.rs`     | `lore install`: 안내문 구간, 설정과 문서 뼈대 설치    |
+| `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬 |
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
@@ -48,6 +48,7 @@
 | `tests/add.rs`       | 고정 예제로 `lore add`를 확인하는 테스트             |
 | `tests/add_source.rs` | 고정 예제로 `lore add source`를 확인하는 테스트     |
 | `tests/install.rs`   | 빈 레포와 기존 파일로 `lore install`을 확인하는 테스트 |
+| `tests/uninstall.rs` | 설치한 것만 걷어내는지 확인하는 테스트               |
 | `tests/skills.rs`    | 스킬과 안내문의 명령 예시가 해석되는지 확인          |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
