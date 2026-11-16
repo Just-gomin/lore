@@ -2,6 +2,7 @@
 //!
 //! 이 크레이트는 네트워크와 LLM 없이 동작한다. 같은 입력에는 같은 출력을 낸다.
 
+pub mod add;
 pub mod build;
 pub mod cli;
 pub mod config;
@@ -59,6 +60,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Build => config::discover(cwd)
             .and_then(|config| build::build(&config))
             .map(|report| output::success(&report, for_human, build::render)),
+        Request::Add(record) => config::discover(cwd)
+            .and_then(|config| add::add(&config, &record))
+            .map(|report| output::success(&report, for_human, add::render_report)),
         Request::Impact { target, hop, edges } => config::discover(cwd)
             .and_then(|config| impact::impact(&config, cwd, &target, hop, &edges))
             .map(|report| output::success(&report, for_human, impact::render)),
