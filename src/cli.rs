@@ -72,7 +72,24 @@ impl Command {
 pub enum Invocation {
     Version { for_human: bool },
     Help { for_human: bool },
-    Command { command: Command, for_human: bool },
+    Run { request: Request, for_human: bool },
+}
+
+/// 실행할 명령과 그 명령의 옵션.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Request {
+    Build,
+    /// 아직 구현하지 않은 명령.
+    Pending(Command),
+}
+
+impl Request {
+    fn from_matches(command: Command, _matches: &clap::ArgMatches) -> Request {
+        match command {
+            Command::Build => Request::Build,
+            other => Request::Pending(other),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -147,7 +164,10 @@ pub fn parse(args: &[String]) -> Result<Invocation, ParseError> {
     match matches.subcommand() {
         None | Some((HELP, _)) => Ok(Invocation::Help { for_human }),
         Some((name, sub)) => match Command::from_name(name) {
-            Some(command) => Ok(Invocation::Command { command, for_human }),
+            Some(command) => Ok(Invocation::Run {
+                request: Request::from_matches(command, sub),
+                for_human,
+            }),
             None => {
                 // 모르는 명령 뒤의 인자는 clap이 해석하지 않고 그대로 넘긴다.
                 let trailing = sub.get_many::<OsString>("").into_iter().flatten();
@@ -177,10 +197,14 @@ mod tests {
     #[test]
     fn 모든_명령_이름을_알아본다() {
         for command in Command::ALL {
+            let expected = match command {
+                Command::Build => Request::Build,
+                other => Request::Pending(other),
+            };
             assert_eq!(
                 parse(&args(&[command.name()])),
-                Ok(Invocation::Command {
-                    command,
+                Ok(Invocation::Run {
+                    request: expected,
                     for_human: false
                 })
             );
@@ -189,12 +213,12 @@ mod tests {
 
     #[test]
     fn for_human은_위치와_상관없이_받는다() {
-        let expected = Ok(Invocation::Command {
-            command: Command::Why,
+        let expected = Ok(Invocation::Run {
+            request: Request::Build,
             for_human: true,
         });
-        assert_eq!(parse(&args(&["--for-human", "why"])), expected);
-        assert_eq!(parse(&args(&["why", "--for-human"])), expected);
+        assert_eq!(parse(&args(&["--for-human", "build"])), expected);
+        assert_eq!(parse(&args(&["build", "--for-human"])), expected);
     }
 
     #[test]

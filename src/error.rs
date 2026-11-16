@@ -59,6 +59,21 @@ pub enum LoreError {
         path: String,
         message: String,
     },
+    /// git 명령이 실패했다. git 레포가 아닐 때도 여기에 든다.
+    Git {
+        message: String,
+    },
+    /// 디비를 읽거나 쓰지 못했다.
+    Database {
+        message: String,
+    },
+}
+
+impl LoreError {
+    /// 프로세스 종료 코드. 사용법 오류(2)와 구별한다.
+    pub fn exit_code(&self) -> u8 {
+        1
+    }
 }
 
 impl fmt::Display for LoreError {
@@ -81,6 +96,8 @@ impl fmt::Display for LoreError {
                 Ok(())
             }
             LoreError::Io { path, message } => write!(f, "{path}: {message}"),
+            LoreError::Git { message } => write!(f, "git: {message}"),
+            LoreError::Database { message } => write!(f, "디비: {message}"),
         }
     }
 }

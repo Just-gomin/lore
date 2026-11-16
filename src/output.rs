@@ -3,6 +3,7 @@
 use serde::Serialize;
 
 use crate::cli::Command;
+use crate::error::LoreError;
 
 /// 사용법이 잘못됐거나 아직 구현되지 않은 명령일 때의 종료 코드.
 pub const EXIT_USAGE: u8 = 2;
@@ -26,17 +27,21 @@ impl Outcome {
 
     /// 오류도 JSON일 때는 표준 출력으로 낸다. 에이전트가 한 곳만 읽으면 되게 하기 위해서다.
     fn fail(for_human: bool, json: String, text: String) -> Outcome {
+        Outcome::fail_with(EXIT_USAGE, for_human, json, text)
+    }
+
+    fn fail_with(code: u8, for_human: bool, json: String, text: String) -> Outcome {
         if for_human {
             Outcome {
                 stdout: String::new(),
                 stderr: text,
-                code: EXIT_USAGE,
+                code,
             }
         } else {
             Outcome {
                 stdout: json,
                 stderr: String::new(),
-                code: EXIT_USAGE,
+                code,
             }
         }
     }
@@ -64,9 +69,16 @@ struct CommandJson {
 }
 
 #[derive(Serialize)]
-struct FailureJson<'a> {
+struct FailureJson<E> {
     ok: bool,
-    error: ErrorJson<'a>,
+    error: E,
+}
+
+#[derive(Serialize)]
+struct SuccessJson<'a, T> {
+    ok: bool,
+    #[serde(flatten)]
+    report: &'a T,
 }
 
 /// 오류 객체. `code`가 맨 앞에 오고 나머지 항목이 뒤따른다.
@@ -85,6 +97,29 @@ fn to_json<T: Serialize>(value: &T) -> String {
 
 fn failure(error: ErrorJson<'_>) -> String {
     to_json(&FailureJson { ok: false, error })
+}
+
+/// 명령이 성공했을 때. JSON은 `ok` 뒤에 결과의 항목을 그대로 펼친다.
+pub fn success<T: Serialize>(
+    report: &T,
+    for_human: bool,
+    text: impl FnOnce(&T) -> String,
+) -> Outcome {
+    if for_human {
+        Outcome::ok(text(report))
+    } else {
+        Outcome::ok(to_json(&SuccessJson { ok: true, report }))
+    }
+}
+
+/// 명령이 실행 중에 실패했을 때.
+pub fn error(error: &LoreError, for_human: bool) -> Outcome {
+    Outcome::fail_with(
+        error.exit_code(),
+        for_human,
+        to_json(&FailureJson { ok: false, error }),
+        format!("lore: {error}"),
+    )
 }
 
 pub fn version(for_human: bool) -> Outcome {
