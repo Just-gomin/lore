@@ -9,8 +9,9 @@ use serde::Serialize;
 
 use crate::config::{self, CONFIG_FILE};
 use crate::error::LoreError;
+use crate::frontmatter;
 use crate::git;
-use crate::source::Kind;
+use crate::source::{Kind, sha256_hex};
 use crate::why::display_width;
 
 /// 표식 형식의 버전. 구간 본문이 바뀌어도 올리지 않고, 표식의 모양을 바꿀 때만 올린다.
@@ -23,6 +24,21 @@ pub const AGENTS_BODY: &str = include_str!("../templates/agents.md");
 /// 도구별 파일에 넣는 한 줄.
 pub const TOOL_POINTER: &str = include_str!("../templates/tool-pointer.md");
 const DEFAULT_CONFIG: &str = include_str!("../templates/lore.config.yaml");
+
+/// 내장 스킬. 이름과 템플릿이다.
+pub const SKILLS: [(&str, &str); 2] = [
+    (
+        "lore-record",
+        include_str!("../templates/skills/lore-record.md"),
+    ),
+    (
+        "lore-source",
+        include_str!("../templates/skills/lore-source.md"),
+    ),
+];
+/// 스킬을 두는 폴더. Claude Code의 프로젝트 스킬 위치다.
+pub const SKILL_DIR: &str = ".claude/skills";
+const HASH_KEY: &str = "metadata:\n  lore-hash: ";
 
 pub const AGENTS_FILE: &str = "AGENTS.md";
 /// 이미 있을 때만 한 줄을 넣는 도구별 파일.
@@ -82,7 +98,7 @@ pub fn project_root(cwd: &Path) -> Result<PathBuf, LoreError> {
         })
 }
 
-pub fn install(cwd: &Path, dry_run: bool) -> Result<InstallReport, LoreError> {
+pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport, LoreError> {
     let root = project_root(cwd)?;
     let mut plan = Plan::new(&root, dry_run);
 
@@ -115,7 +131,50 @@ pub fn install(cwd: &Path, dry_run: bool) -> Result<InstallReport, LoreError> {
         }
     }
 
+    if skills {
+        for (name, template) in SKILLS {
+            let path = skill_path(name);
+            let text = installed_skill(template);
+            match plan.read(&path)? {
+                // 사람이 고친 스킬은 덮어쓰지 않는다.
+                Some(old) if old != text && !skill_untouched(&old) => {
+                    plan.record(&path, Change::Kept)
+                }
+                old => plan.write(&path, old.as_deref(), &text)?,
+            }
+        }
+    }
+
     Ok(plan.finish())
+}
+
+pub fn skill_path(name: &str) -> String {
+    format!("{SKILL_DIR}/{name}/SKILL.md")
+}
+
+/// 설치할 스킬 파일. 템플릿의 머리말 끝에 템플릿 전체의 해시를 더한다.
+pub fn installed_skill(template: &str) -> String {
+    let (yaml, body) = frontmatter::split(template).expect("내장 스킬에는 머리말이 있다");
+    format!(
+        "---\n{yaml}{HASH_KEY}{}\n---\n{body}",
+        sha256_hex(template.as_bytes())
+    )
+}
+
+/// 설치한 뒤 아무도 고치지 않은 스킬인지. 해시 줄을 빼고 되돌린 글의 해시가 적힌 해시와 같아야 한다.
+///
+/// 지금 버전과 달라도 예전 버전이 설치하고 아무도 고치지 않았으면 참이다.
+pub fn skill_untouched(text: &str) -> bool {
+    let Some(start) = text.find(HASH_KEY) else {
+        return false;
+    };
+    let value_start = start + HASH_KEY.len();
+    let Some(line_end) = text[value_start..].find('\n') else {
+        return false;
+    };
+    let recorded = &text[value_start..value_start + line_end];
+    let original = format!("{}{}", &text[..start], &text[value_start + line_end + 1..]);
+    sha256_hex(original.as_bytes()) == recorded
 }
 
 /// 바꿀 파일을 모으고, `dry_run`이 아니면 실제로 쓴다.
@@ -281,6 +340,17 @@ mod tests {
             put_section(Some(old), "새 본문", "A.md").unwrap(),
             "앞\n<!-- lore:begin v1 -->\n\n새 본문\n\n<!-- lore:end -->\n뒤\n"
         );
+    }
+
+    #[test]
+    fn 고치지_않은_스킬만_그대로로_본다() {
+        for (_, template) in SKILLS {
+            let installed = installed_skill(template);
+            assert!(installed.contains("\nmetadata:\n  lore-hash: "));
+            assert!(skill_untouched(&installed));
+            assert!(!skill_untouched(&installed.replace("## 1.", "## 하나.")));
+            assert!(!skill_untouched(template));
+        }
     }
 
     #[test]

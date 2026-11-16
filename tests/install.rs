@@ -48,6 +48,8 @@ fn 빈_레포에_설정_뼈대_안내문을_만들고_빌드가_된다() {
             ("docs/incidents/.gitkeep", "created"),
             ("docs/sources/.gitkeep", "created"),
             ("AGENTS.md", "created"),
+            (".claude/skills/lore-record/SKILL.md", "created"),
+            (".claude/skills/lore-source/SKILL.md", "created"),
         ]
         .map(|(p, c)| (p.to_string(), c.to_string()))
     );
@@ -131,7 +133,7 @@ fn dry_run은_목록만_내고_쓰지_않는다() {
     let dir = empty_repo();
     let report = json(&lore_in(dir.path(), &["install", "--dry-run"]));
     assert_eq!(report["dry_run"], true);
-    assert_eq!(changes(&report).len(), 6);
+    assert_eq!(changes(&report).len(), 8);
     assert_eq!(
         git(
             dir.path(),
@@ -160,4 +162,45 @@ fn git_레포가_아니면_not_a_git_repo다() {
     let dir = TempDir::new().unwrap();
     let output = lore_in(dir.path(), &["install"]);
     assert_eq!(json(&output)["error"]["code"], "not_a_git_repo");
+}
+
+#[test]
+fn no_skills면_스킬을_설치하지_않는다() {
+    let dir = empty_repo();
+    let report = json(&lore_in(dir.path(), &["install", "--no-skills"]));
+    assert!(
+        changes(&report)
+            .iter()
+            .all(|(path, _)| !path.starts_with(".claude/"))
+    );
+    assert!(!dir.path().join(".claude").exists());
+}
+
+#[test]
+fn 사람이_고친_스킬은_덮어쓰지_않고_남긴다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    let path = ".claude/skills/lore-record/SKILL.md";
+    let edited =
+        read(dir.path(), path).replace("## 1. 기록할 것 찾기", "## 1. 우리 팀이 기록할 것");
+    std::fs::write(dir.path().join(path), &edited).unwrap();
+
+    let report = json(&lore_in(dir.path(), &["install"]));
+    assert!(changes(&report).contains(&(path.to_string(), "kept".to_string())));
+    assert_eq!(read(dir.path(), path), edited);
+}
+
+#[test]
+fn 예전_버전이_설치하고_고치지_않은_스킬은_새_버전으로_바꾼다() {
+    let dir = empty_repo();
+    let path = ".claude/skills/lore-record/SKILL.md";
+    let old = lore::install::installed_skill(
+        "---\nname: lore-record\ndescription: 옛 설명\n---\n\n옛 본문\n",
+    );
+    std::fs::create_dir_all(dir.path().join(".claude/skills/lore-record")).unwrap();
+    std::fs::write(dir.path().join(path), old).unwrap();
+
+    let report = json(&lore_in(dir.path(), &["install"]));
+    assert!(changes(&report).contains(&(path.to_string(), "updated".to_string())));
+    assert!(read(dir.path(), path).contains("# lore 기록"));
 }

@@ -98,6 +98,8 @@ pub enum Request {
     Add(Box<NewRecord>),
     Install {
         dry_run: bool,
+        /// `--no-skills`면 거짓이다.
+        skills: bool,
     },
     AddSource {
         /// 입력 JSON 파일. 없으면 표준 입력에서 읽는다.
@@ -137,6 +139,7 @@ impl Request {
             },
             Command::Install => Request::Install {
                 dry_run: matches.get_flag(DRY_RUN),
+                skills: !matches.get_flag(NO_SKILLS),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -224,6 +227,7 @@ const DECISIONS: &str = "decisions";
 const SOURCE: &str = "source";
 const FROM: &str = "from";
 const DRY_RUN: &str = "dry-run";
+const NO_SKILLS: &str = "no-skills";
 
 fn parse_slug(value: &str) -> Result<String, String> {
     if is_slug(value) {
@@ -288,9 +292,13 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
-        Command::Install => {
-            definition.arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
-        }
+        Command::Install => definition
+            .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
+            .arg(
+                Arg::new(NO_SKILLS)
+                    .long(NO_SKILLS)
+                    .action(ArgAction::SetTrue),
+            ),
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -360,6 +368,12 @@ fn definition() -> clap::Command {
 ///
 /// `--for-human`은 어느 위치에 있어도 받는다.
 pub fn parse(args: &[String]) -> Result<Invocation, ParseError> {
+    // 하위 명령 뒤의 도움말 플래그는 필수 인자 검사보다 먼저 본다.
+    if args.iter().any(|arg| arg == "--help" || arg == "-h") {
+        return Ok(Invocation::Help {
+            for_human: args.iter().any(|arg| arg == "--for-human"),
+        });
+    }
     let argv = std::iter::once("lore").chain(args.iter().map(String::as_str));
     let matches =
         definition()
@@ -446,7 +460,13 @@ mod tests {
                         decisions: Vec::new(),
                     })),
                 ),
-                Command::Install => (vec!["install"], Request::Install { dry_run: false }),
+                Command::Install => (
+                    vec!["install"],
+                    Request::Install {
+                        dry_run: false,
+                        skills: true,
+                    },
+                ),
                 other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
@@ -467,6 +487,14 @@ mod tests {
         });
         assert_eq!(parse(&args(&["--for-human", "build"])), expected);
         assert_eq!(parse(&args(&["build", "--for-human"])), expected);
+    }
+
+    #[test]
+    fn 하위_명령_뒤의_도움말은_필수_인자보다_먼저_본다() {
+        assert_eq!(
+            parse(&args(&["add", "decision", "--help"])),
+            Ok(Invocation::Help { for_human: false })
+        );
     }
 
     #[test]
