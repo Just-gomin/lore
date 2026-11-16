@@ -96,6 +96,9 @@ pub enum Request {
     },
     /// 기록 하나의 인자가 다른 요청보다 훨씬 커서 상자에 담는다.
     Add(Box<NewRecord>),
+    Install {
+        dry_run: bool,
+    },
     AddSource {
         /// 입력 JSON 파일. 없으면 표준 입력에서 읽는다.
         from: Option<String>,
@@ -131,6 +134,9 @@ impl Request {
                     .get_one::<String>(DEPTH)
                     .and_then(|name| Depth::from_name(name))
                     .unwrap_or(Depth::Index),
+            },
+            Command::Install => Request::Install {
+                dry_run: matches.get_flag(DRY_RUN),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -217,6 +223,7 @@ const CONFIDENCE: &str = "confidence";
 const DECISIONS: &str = "decisions";
 const SOURCE: &str = "source";
 const FROM: &str = "from";
+const DRY_RUN: &str = "dry-run";
 
 fn parse_slug(value: &str) -> Result<String, String> {
     if is_slug(value) {
@@ -281,6 +288,9 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
+        Command::Install => {
+            definition.arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
+        }
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -436,6 +446,7 @@ mod tests {
                         decisions: Vec::new(),
                     })),
                 ),
+                Command::Install => (vec!["install"], Request::Install { dry_run: false }),
                 other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(

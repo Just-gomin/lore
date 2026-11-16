@@ -75,6 +75,14 @@ pub enum LoreError {
     ExcludedChannel {
         channel: String,
     },
+    /// 설정 파일도 없고 git 레포도 아니어서 프로젝트 홈을 정할 수 없다.
+    NotAGitRepo {
+        start: String,
+    },
+    /// lore 구간의 표식이 깨져 있다. 고치지 않고 사람에게 맡긴다.
+    BrokenMarker {
+        path: String,
+    },
     /// 만들려는 기록의 ID를 이미 쓰고 있다.
     IdExists {
         id: String,
@@ -130,6 +138,14 @@ impl fmt::Display for LoreError {
             LoreError::ExcludedChannel { channel } => write!(
                 f,
                 "채널 '{channel}'은 제외 등급이라 소스 노트로 만들지 않습니다."
+            ),
+            LoreError::NotAGitRepo { start } => write!(
+                f,
+                "{start}는 git 레포가 아니고 위 폴더에 lore.config.yaml도 없습니다."
+            ),
+            LoreError::BrokenMarker { path } => write!(
+                f,
+                "{path}의 lore 구간 표식이 깨져 있습니다. 시작과 끝 표식이 하나씩 있도록 손으로 고친 뒤 다시 실행하세요."
             ),
             LoreError::IdExists { id, path } => write!(
                 f,

@@ -45,6 +45,15 @@ pub fn tracked_files(root: &Path) -> Result<Vec<String>, LoreError> {
     Ok(files)
 }
 
+/// `dir`이 든 git 레포의 최상위 폴더. git 레포가 아니면 `None`이다.
+pub fn toplevel(dir: &Path) -> Option<std::path::PathBuf> {
+    git(dir, &["rev-parse", "--show-toplevel"])
+        .ok()
+        .map(|out| String::from_utf8_lossy(&out).trim().to_string())
+        .filter(|path| !path.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
 /// 현재 커밋. 커밋이 하나도 없으면 `None`이다.
 pub fn head_commit(root: &Path) -> Option<String> {
     git(root, &["rev-parse", "--verify", "--quiet", "HEAD"])

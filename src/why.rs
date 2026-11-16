@@ -483,7 +483,7 @@ fn indent(text: &str) -> String {
 }
 
 /// 고정폭 글꼴에서 차지하는 칸 수. 한글과 한자 같은 넓은 글자는 두 칸이다.
-fn display_width(text: &str) -> usize {
+pub(crate) fn display_width(text: &str) -> usize {
     text.chars()
         .map(|ch| match ch as u32 {
             0x1100..=0x115F
