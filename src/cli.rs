@@ -96,6 +96,10 @@ pub enum Request {
     },
     /// 기록 하나의 인자가 다른 요청보다 훨씬 커서 상자에 담는다.
     Add(Box<NewRecord>),
+    Uninstall {
+        dry_run: bool,
+        with_config: bool,
+    },
     Install {
         dry_run: bool,
         /// `--no-skills`면 거짓이다.
@@ -136,6 +140,10 @@ impl Request {
                     .get_one::<String>(DEPTH)
                     .and_then(|name| Depth::from_name(name))
                     .unwrap_or(Depth::Index),
+            },
+            Command::Uninstall => Request::Uninstall {
+                dry_run: matches.get_flag(DRY_RUN),
+                with_config: matches.get_flag(WITH_CONFIG),
             },
             Command::Install => Request::Install {
                 dry_run: matches.get_flag(DRY_RUN),
@@ -228,6 +236,7 @@ const SOURCE: &str = "source";
 const FROM: &str = "from";
 const DRY_RUN: &str = "dry-run";
 const NO_SKILLS: &str = "no-skills";
+const WITH_CONFIG: &str = "with-config";
 
 fn parse_slug(value: &str) -> Result<String, String> {
     if is_slug(value) {
@@ -291,6 +300,13 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_delimiter(',')
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
+            ),
+        Command::Uninstall => definition
+            .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
+            .arg(
+                Arg::new(WITH_CONFIG)
+                    .long(WITH_CONFIG)
+                    .action(ArgAction::SetTrue),
             ),
         Command::Install => definition
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
@@ -459,6 +475,13 @@ mod tests {
                         confidence: "inferred".to_string(),
                         decisions: Vec::new(),
                     })),
+                ),
+                Command::Uninstall => (
+                    vec!["uninstall", "--with-config"],
+                    Request::Uninstall {
+                        dry_run: false,
+                        with_config: true,
+                    },
                 ),
                 Command::Install => (
                     vec!["install"],

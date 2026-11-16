@@ -239,6 +239,24 @@ impl<'a> Plan<'a> {
         Ok(())
     }
 
+    /// 파일을 지우고, 그 때문에 비게 된 폴더도 프로젝트 홈 바로 아래까지 함께 지운다.
+    pub(crate) fn remove(&mut self, path: &str) -> Result<(), LoreError> {
+        if !self.dry_run {
+            let file = self.root.join(path);
+            std::fs::remove_file(&file).map_err(|error| Self::io_error(path, error))?;
+            let mut dir = file.parent();
+            while let Some(current) = dir.filter(|current| *current != self.root) {
+                // 비어 있지 않은 폴더에서 실패하고 멈춘다.
+                if std::fs::remove_dir(current).is_err() {
+                    break;
+                }
+                dir = current.parent();
+            }
+        }
+        self.record(path, Change::Removed);
+        Ok(())
+    }
+
     pub(crate) fn finish(self) -> InstallReport {
         InstallReport {
             dry_run: self.dry_run,
@@ -298,6 +316,67 @@ pub fn put_section(text: Option<&str>, body: &str, path: &str) -> Result<String,
     })
 }
 
+/// 구간을 지운 글. 구간이 없으면 `None`이다.
+///
+/// 설치가 구간 앞에 더한 빈 줄도 함께 지워, 끝에 붙였던 구간이면 설치 전의 글로 돌아간다.
+pub fn remove_section(text: &str, path: &str) -> Result<Option<String>, LoreError> {
+    let Some((start, end)) = find_section(text, path)? else {
+        return Ok(None);
+    };
+    let mut before = &text[..start];
+    let mut after = &text[end..];
+    if before.ends_with("\n\n") {
+        if after.is_empty() {
+            before = &before[..before.len() - 1];
+        } else if let Some(rest) = after.strip_prefix('\n') {
+            after = rest;
+        }
+    }
+    Ok(Some(format!("{before}{after}")))
+}
+
+/// `lore install`이 넣은 것을 걷어낸다. `docs/`의 기록은 지우지 않는다.
+pub fn uninstall(cwd: &Path, dry_run: bool, with_config: bool) -> Result<InstallReport, LoreError> {
+    let root = project_root(cwd)?;
+    let mut plan = Plan::new(&root, dry_run);
+
+    if let Some(old) = plan.read(AGENTS_FILE)? {
+        match remove_section(&old, AGENTS_FILE)? {
+            None => plan.record(AGENTS_FILE, Change::Unchanged),
+            // 구간만 있던 파일은 설치가 만든 것이다.
+            Some(text) if text.trim().is_empty() => plan.remove(AGENTS_FILE)?,
+            Some(text) => plan.write(AGENTS_FILE, Some(&old), &text)?,
+        }
+    }
+
+    // 도구별 파일은 사람이 만든 파일이므로 비어도 지우지 않는다.
+    for file in TOOL_FILES {
+        if let Some(old) = plan.read(file)? {
+            match remove_section(&old, file)? {
+                None => plan.record(file, Change::Unchanged),
+                Some(text) => plan.write(file, Some(&old), &text)?,
+            }
+        }
+    }
+
+    for (name, _) in SKILLS {
+        let path = skill_path(name);
+        if let Some(text) = plan.read(&path)? {
+            if skill_untouched(&text) {
+                plan.remove(&path)?;
+            } else {
+                plan.record(&path, Change::Kept);
+            }
+        }
+    }
+
+    if with_config && root.join(CONFIG_FILE).exists() {
+        plan.remove(CONFIG_FILE)?;
+    }
+
+    Ok(plan.finish())
+}
+
 /// 사람용 설치 결과.
 pub fn render(report: &InstallReport) -> String {
     let counts: Vec<String> = Change::ALL
@@ -351,6 +430,24 @@ mod tests {
             assert!(!skill_untouched(&installed.replace("## 1.", "## 하나.")));
             assert!(!skill_untouched(template));
         }
+    }
+
+    #[test]
+    fn 구간을_지우면_설치_전의_글로_돌아간다() {
+        for original in ["# 제목\n", "", "앞\n\n뒤\n"] {
+            let installed = put_section(Some(original), "본문", "A.md").unwrap();
+            assert_eq!(
+                remove_section(&installed, "A.md").unwrap().as_deref(),
+                Some(original),
+                "{original:?}"
+            );
+        }
+        let middle = "앞\n\n<!-- lore:begin v1 -->\n\n본문\n\n<!-- lore:end -->\n\n뒤\n";
+        assert_eq!(
+            remove_section(middle, "A.md").unwrap().as_deref(),
+            Some("앞\n\n뒤\n")
+        );
+        assert_eq!(remove_section("구간 없음\n", "A.md").unwrap(), None);
     }
 
     #[test]
