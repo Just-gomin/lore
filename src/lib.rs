@@ -14,6 +14,7 @@ pub mod git;
 pub mod graph;
 pub mod impact;
 pub mod index;
+pub mod install;
 pub mod output;
 pub mod query;
 pub mod source;
@@ -83,6 +84,8 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Add(record) => config::discover(cwd)
             .and_then(|config| add::add(&config, &record))
             .map(|report| output::success(&report, for_human, add::render_report)),
+        Request::Install { dry_run } => install::install(cwd, dry_run)
+            .map(|report| output::success(&report, for_human, install::render)),
         Request::AddSource { from, date } => read_input(from.as_deref(), cwd)
             .and_then(|(name, text)| add_source::parse_input(&name, &text))
             .and_then(|input| {

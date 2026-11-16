@@ -1,0 +1,303 @@
+//! `lore install`: 프로젝트에 lore로 작업하는 방법을 심는다.
+//!
+//! `AGENTS.md`의 안내문 구간, 도구별 파일의 한 줄, 설정과 문서 뼈대를 만든다.
+//! 여러 번 실행해도 결과가 같고, 구간 밖의 글은 건드리지 않는다.
+
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+
+use crate::config::{self, CONFIG_FILE};
+use crate::error::LoreError;
+use crate::git;
+use crate::source::Kind;
+use crate::why::display_width;
+
+/// 표식 형식의 버전. 구간 본문이 바뀌어도 올리지 않고, 표식의 모양을 바꿀 때만 올린다.
+pub const MARKER_VERSION: u32 = 1;
+const BEGIN_PREFIX: &str = "<!-- lore:begin v";
+const END: &str = "<!-- lore:end -->";
+
+/// 안내문 본문.
+pub const AGENTS_BODY: &str = include_str!("../templates/agents.md");
+/// 도구별 파일에 넣는 한 줄.
+pub const TOOL_POINTER: &str = include_str!("../templates/tool-pointer.md");
+const DEFAULT_CONFIG: &str = include_str!("../templates/lore.config.yaml");
+
+pub const AGENTS_FILE: &str = "AGENTS.md";
+/// 이미 있을 때만 한 줄을 넣는 도구별 파일.
+pub const TOOL_FILES: [&str; 2] = ["CLAUDE.md", "GEMINI.md"];
+
+/// 파일에 일어난 일. 걷어내기의 지움과 남김도 여기에 둔다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Change {
+    Created,
+    Updated,
+    Unchanged,
+    Removed,
+    Kept,
+}
+
+impl Change {
+    pub fn label(self) -> &'static str {
+        match self {
+            Change::Created => "만듦",
+            Change::Updated => "바꿈",
+            Change::Unchanged => "그대로",
+            Change::Removed => "지움",
+            Change::Kept => "남김",
+        }
+    }
+
+    const ALL: [Change; 5] = [
+        Change::Created,
+        Change::Updated,
+        Change::Unchanged,
+        Change::Removed,
+        Change::Kept,
+    ];
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChange {
+    /// 프로젝트 홈 기준 경로. 폴더는 `/`로 끝난다.
+    pub path: String,
+    pub change: Change,
+}
+
+/// 설치나 걷어내기의 결과. JSON 출력이 된다.
+#[derive(Debug, Serialize)]
+pub struct InstallReport {
+    pub dry_run: bool,
+    pub files: Vec<FileChange>,
+}
+
+/// 설치할 프로젝트 홈. 위로 올라가며 설정 파일을 찾고, 없으면 git 레포의 최상위 폴더다.
+pub fn project_root(cwd: &Path) -> Result<PathBuf, LoreError> {
+    config::find_root(cwd)
+        .or_else(|| git::toplevel(cwd))
+        .ok_or_else(|| LoreError::NotAGitRepo {
+            start: cwd.display().to_string(),
+        })
+}
+
+pub fn install(cwd: &Path, dry_run: bool) -> Result<InstallReport, LoreError> {
+    let root = project_root(cwd)?;
+    let mut plan = Plan::new(&root, dry_run);
+
+    let config_path = root.join(CONFIG_FILE);
+    let docs = if config_path.exists() {
+        plan.record(CONFIG_FILE, Change::Unchanged);
+        config::load(&root)?.docs
+    } else {
+        plan.write(CONFIG_FILE, None, DEFAULT_CONFIG)?;
+        "docs".to_string()
+    };
+
+    for kind in Kind::ALL {
+        let dir = format!("{docs}/{}", kind.folder());
+        if root.join(&dir).is_dir() {
+            plan.record(&format!("{dir}/"), Change::Unchanged);
+        } else {
+            plan.write(&format!("{dir}/.gitkeep"), None, "")?;
+        }
+    }
+
+    let agents = plan.read(AGENTS_FILE)?;
+    let text = put_section(agents.as_deref(), AGENTS_BODY, AGENTS_FILE)?;
+    plan.write(AGENTS_FILE, agents.as_deref(), &text)?;
+
+    for file in TOOL_FILES {
+        if let Some(old) = plan.read(file)? {
+            let text = put_section(Some(&old), TOOL_POINTER, file)?;
+            plan.write(file, Some(&old), &text)?;
+        }
+    }
+
+    Ok(plan.finish())
+}
+
+/// 바꿀 파일을 모으고, `dry_run`이 아니면 실제로 쓴다.
+pub(crate) struct Plan<'a> {
+    root: &'a Path,
+    dry_run: bool,
+    files: Vec<FileChange>,
+}
+
+impl<'a> Plan<'a> {
+    pub(crate) fn new(root: &'a Path, dry_run: bool) -> Plan<'a> {
+        Plan {
+            root,
+            dry_run,
+            files: Vec::new(),
+        }
+    }
+
+    fn io_error(path: &str, error: std::io::Error) -> LoreError {
+        LoreError::Io {
+            path: path.to_string(),
+            message: error.to_string(),
+        }
+    }
+
+    /// 파일 내용. 없으면 `None`이다.
+    pub(crate) fn read(&self, path: &str) -> Result<Option<String>, LoreError> {
+        match std::fs::read_to_string(self.root.join(path)) {
+            Ok(text) => Ok(Some(text)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(Self::io_error(path, error)),
+        }
+    }
+
+    pub(crate) fn record(&mut self, path: &str, change: Change) {
+        self.files.push(FileChange {
+            path: path.to_string(),
+            change,
+        });
+    }
+
+    /// `old`가 지금 내용이다. 같으면 쓰지 않는다.
+    pub(crate) fn write(
+        &mut self,
+        path: &str,
+        old: Option<&str>,
+        text: &str,
+    ) -> Result<(), LoreError> {
+        let change = match old {
+            None => Change::Created,
+            Some(old) if old == text => Change::Unchanged,
+            Some(_) => Change::Updated,
+        };
+        if change != Change::Unchanged && !self.dry_run {
+            let file = self.root.join(path);
+            if let Some(dir) = file.parent() {
+                std::fs::create_dir_all(dir).map_err(|error| Self::io_error(path, error))?;
+            }
+            std::fs::write(&file, text).map_err(|error| Self::io_error(path, error))?;
+        }
+        self.record(path, change);
+        Ok(())
+    }
+
+    pub(crate) fn finish(self) -> InstallReport {
+        InstallReport {
+            dry_run: self.dry_run,
+            files: self.files,
+        }
+    }
+}
+
+/// 본문을 표식으로 감싼 구간.
+pub fn section(body: &str) -> String {
+    format!(
+        "{BEGIN_PREFIX}{MARKER_VERSION} -->\n\n{}\n\n{END}\n",
+        body.trim_end()
+    )
+}
+
+/// 구간이 차지하는 바이트 범위. 끝 표식 줄의 줄바꿈까지 든다. 구간이 없으면 `None`이다.
+///
+/// 시작이나 끝 표식만 있거나, 구간이 둘 이상이거나, 순서가 뒤집혔으면 `broken_marker`다.
+pub fn find_section(text: &str, path: &str) -> Result<Option<(usize, usize)>, LoreError> {
+    let mut begins = Vec::new();
+    let mut ends = Vec::new();
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        let is_begin = trimmed
+            .strip_prefix(BEGIN_PREFIX)
+            .and_then(|rest| rest.strip_suffix(" -->"))
+            .is_some_and(|version| version.parse::<u32>().is_ok());
+        if is_begin {
+            begins.push(offset);
+        } else if trimmed == END {
+            ends.push(offset + line.len());
+        }
+        offset += line.len();
+    }
+    match (begins.as_slice(), ends.as_slice()) {
+        ([], []) => Ok(None),
+        ([begin], [end]) if begin < end => Ok(Some((*begin, *end))),
+        _ => Err(LoreError::BrokenMarker {
+            path: path.to_string(),
+        }),
+    }
+}
+
+/// 구간을 넣거나 바꾼 글. 구간이 없으면 빈 줄 하나를 두고 파일 끝에 붙인다.
+pub fn put_section(text: Option<&str>, body: &str, path: &str) -> Result<String, LoreError> {
+    let section = section(body);
+    let Some(text) = text else {
+        return Ok(section);
+    };
+    Ok(match find_section(text, path)? {
+        Some((start, end)) => format!("{}{section}{}", &text[..start], &text[end..]),
+        None if text.is_empty() => section,
+        None if text.ends_with('\n') => format!("{text}\n{section}"),
+        None => format!("{text}\n\n{section}"),
+    })
+}
+
+/// 사람용 설치 결과.
+pub fn render(report: &InstallReport) -> String {
+    let counts: Vec<String> = Change::ALL
+        .into_iter()
+        .filter_map(|change| {
+            let count = report.files.iter().filter(|f| f.change == change).count();
+            (count > 0).then(|| format!("{} {count}", change.label()))
+        })
+        .collect();
+    let mut text = format!("lore: {}", counts.join(", "));
+    for file in &report.files {
+        let label = file.change.label();
+        let pad = " ".repeat(6 - display_width(label));
+        text.push_str(&format!("\n  {label}{pad}  {}", file.path));
+    }
+    if report.dry_run {
+        text.push_str("\n\n--dry-run: 아무것도 쓰지 않았습니다.");
+    }
+    text
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 구간이_없으면_빈_줄을_두고_끝에_붙인다() {
+        let text = put_section(Some("# 제목\n"), "본문\n", "A.md").unwrap();
+        assert_eq!(
+            text,
+            "# 제목\n\n<!-- lore:begin v1 -->\n\n본문\n\n<!-- lore:end -->\n"
+        );
+        assert_eq!(put_section(Some(&text), "본문\n", "A.md").unwrap(), text);
+    }
+
+    #[test]
+    fn 구간만_바꾸고_밖의_글은_그대로_둔다() {
+        let old = "앞\n<!-- lore:begin v0 -->\n옛 본문\n<!-- lore:end -->\n뒤\n";
+        assert_eq!(
+            put_section(Some(old), "새 본문", "A.md").unwrap(),
+            "앞\n<!-- lore:begin v1 -->\n\n새 본문\n\n<!-- lore:end -->\n뒤\n"
+        );
+    }
+
+    #[test]
+    fn 깨진_표식은_고치지_않고_오류를_낸다() {
+        for text in [
+            "<!-- lore:begin v1 -->\n",
+            "<!-- lore:end -->\n",
+            "<!-- lore:end -->\n<!-- lore:begin v1 -->\n",
+            "<!-- lore:begin v1 -->\n<!-- lore:end -->\n<!-- lore:begin v1 -->\n<!-- lore:end -->\n",
+        ] {
+            assert!(
+                matches!(
+                    put_section(Some(text), "본문", "A.md"),
+                    Err(LoreError::BrokenMarker { .. })
+                ),
+                "{text}"
+            );
+        }
+    }
+}
