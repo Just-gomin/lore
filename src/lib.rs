@@ -10,8 +10,10 @@ pub mod error;
 pub mod frontmatter;
 pub mod git;
 pub mod graph;
+pub mod impact;
 pub mod index;
 pub mod output;
+pub mod query;
 pub mod source;
 pub mod why;
 
@@ -57,6 +59,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Build => config::discover(cwd)
             .and_then(|config| build::build(&config))
             .map(|report| output::success(&report, for_human, build::render)),
+        Request::Impact { target, hop, edges } => config::discover(cwd)
+            .and_then(|config| impact::impact(&config, cwd, &target, hop, &edges))
+            .map(|report| output::success(&report, for_human, impact::render)),
         Request::Why { target, depth } => config::discover(cwd)
             .and_then(|config| why::why(&config, cwd, &target, depth))
             .map(|report| output::success(&report, for_human, why::render)),

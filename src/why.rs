@@ -1,6 +1,6 @@
 //! `lore why`: ID나 파일 경로에 연결된 결정과 사고를 조회한다.
 //!
-//! 디비만 읽는다. 디비가 작업 트리보다 오래됐으면 먼저 다시 만든다.
+//! 디비만 읽는다. 디비가 작업 트리보다 오래됐으면 먼저 다시 만든다([`query::open_target`]).
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -8,10 +8,10 @@ use std::path::Path;
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
-use crate::build;
 use crate::config::Config;
-use crate::db::{self, database_error};
+use crate::db::database_error;
 use crate::error::LoreError;
+use crate::query;
 use crate::source::{id_date, is_link};
 
 /// 얼마나 깊이 내려가 보여 줄지.
@@ -128,20 +128,7 @@ impl Record {
 
 /// 대상을 조회한다. 디비가 없거나 작업 트리와 다르면 먼저 다시 만든다.
 pub fn why(config: &Config, cwd: &Path, input: &str, depth: Depth) -> Result<WhyReport, LoreError> {
-    if input.contains('#') {
-        return Err(LoreError::UnsupportedTarget {
-            target: input.to_string(),
-            message: "심볼 단위 조회는 6단계에서 지원합니다. 지금은 ID나 파일 경로를 넘기세요."
-                .to_string(),
-        });
-    }
-
-    let rebuilt = ensure_fresh(config)?;
-    let conn = db::open(&build::db_path(config))?;
-    let (id, kind) =
-        resolve(&conn, config, cwd, input)?.ok_or_else(|| LoreError::TargetNotFound {
-            target: input.to_string(),
-        })?;
+    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input)?;
 
     let reader = Reader { conn: &conn, depth };
     let (features, records) = match kind.as_str() {
@@ -161,65 +148,6 @@ pub fn why(config: &Config, cwd: &Path, input: &str, depth: Depth) -> Result<Why
         features,
         records,
     })
-}
-
-/// 디비가 지금의 작업 트리로 만든 것인지 보고, 아니면 다시 만든다.
-fn ensure_fresh(config: &Config) -> Result<bool, LoreError> {
-    let path = build::db_path(config);
-    if path.exists() {
-        let conn = db::open(&path)?;
-        let schema = db::read_meta(&conn, "schema_version");
-        let fingerprint = db::read_meta(&conn, "fingerprint");
-        drop(conn);
-        if schema.as_deref() == Some(db::SCHEMA_VERSION)
-            && fingerprint == Some(build::fingerprint(&config.root)?)
-        {
-            return Ok(false);
-        }
-    }
-    build::build(config)?;
-    Ok(true)
-}
-
-/// 입력을 노드 ID와 종류로 바꾼다. ID가 먼저이고, 그다음 파일 경로다.
-///
-/// 파일 경로는 현재 폴더 기준으로 읽고, 프로젝트 홈 밖이면 프로젝트 홈 기준으로 다시 읽는다.
-fn resolve(
-    conn: &Connection,
-    config: &Config,
-    cwd: &Path,
-    input: &str,
-) -> Result<Option<(String, String)>, LoreError> {
-    let mut candidates = vec![input.to_string()];
-    if let Some(path) = project_path(&config.root, cwd, input) {
-        candidates.push(path);
-    }
-    candidates.push(input.trim_start_matches("./").to_string());
-
-    for id in candidates {
-        let kind: Option<String> = conn
-            .query_row("SELECT kind FROM nodes WHERE id = ?1", [&id], |row| {
-                row.get(0)
-            })
-            .optional()
-            .map_err(database_error)?;
-        if let Some(kind) = kind {
-            return Ok(Some((id, kind)));
-        }
-    }
-    Ok(None)
-}
-
-/// 현재 폴더 기준 경로를 프로젝트 홈 기준 경로로 바꾼다. 파일이 없거나 홈 밖이면 `None`이다.
-fn project_path(root: &Path, cwd: &Path, input: &str) -> Option<String> {
-    let root = root.canonicalize().ok()?;
-    let file = cwd.join(input).canonicalize().ok()?;
-    let relative = file.strip_prefix(&root).ok()?;
-    let parts: Vec<String> = relative
-        .components()
-        .map(|part| part.as_os_str().to_string_lossy().into_owned())
-        .collect();
-    Some(parts.join("/"))
 }
 
 struct Reader<'a> {

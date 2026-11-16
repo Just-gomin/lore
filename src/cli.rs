@@ -4,6 +4,8 @@ use std::ffi::OsString;
 
 use clap::{Arg, ArgAction, ColorChoice};
 
+use crate::graph::EdgeKind;
+use crate::impact::TRAVERSABLE;
 use crate::why::Depth;
 
 /// lore가 제공하는 명령.
@@ -85,6 +87,11 @@ pub enum Request {
         target: String,
         depth: Depth,
     },
+    Impact {
+        target: String,
+        hop: u32,
+        edges: Vec<EdgeKind>,
+    },
     /// 아직 구현하지 않은 명령.
     Pending(Command),
 }
@@ -93,6 +100,19 @@ impl Request {
     fn from_matches(command: Command, matches: &clap::ArgMatches) -> Request {
         match command {
             Command::Build => Request::Build,
+            Command::Impact => Request::Impact {
+                target: matches
+                    .get_one::<String>(TARGET)
+                    .cloned()
+                    .unwrap_or_default(),
+                hop: matches.get_one::<u32>(HOP).copied().unwrap_or(1),
+                edges: matches
+                    .get_many::<String>(EDGES)
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|name| EdgeKind::from_name(name))
+                    .collect(),
+            },
             Command::Why => Request::Why {
                 target: matches
                     .get_one::<String>(TARGET)
@@ -119,6 +139,8 @@ const HELP: &str = "help";
 const VERSION: &str = "version";
 const TARGET: &str = "target";
 const DEPTH: &str = "depth";
+const HOP: &str = "hop";
+const EDGES: &str = "edges";
 
 /// 명령별 인자를 붙인다.
 fn with_arguments(command: Command, definition: clap::Command) -> clap::Command {
@@ -130,6 +152,21 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(DEPTH)
                     .value_parser(Depth::NAMES)
                     .default_value("index"),
+            ),
+        Command::Impact => definition
+            .arg(Arg::new(TARGET).required(true).value_name("ID | 파일 경로"))
+            .arg(
+                Arg::new(HOP)
+                    .long(HOP)
+                    .value_parser(clap::value_parser!(u32))
+                    .default_value("1"),
+            )
+            .arg(
+                Arg::new(EDGES)
+                    .long(EDGES)
+                    .value_delimiter(',')
+                    .value_parser(TRAVERSABLE.map(EdgeKind::name))
+                    .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
         _ => definition,
     }
@@ -242,6 +279,14 @@ mod tests {
                         depth: Depth::Index,
                     },
                 ),
+                Command::Impact => (
+                    vec!["impact", "common"],
+                    Request::Impact {
+                        target: "common".to_string(),
+                        hop: 1,
+                        edges: TRAVERSABLE.to_vec(),
+                    },
+                ),
                 other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
@@ -322,6 +367,32 @@ mod tests {
             parse(&args(&["why", "a.ts", "--depth=all"])),
             Err(ParseError::InvalidArguments { .. })
         ));
+    }
+
+    #[test]
+    fn impact는_홉과_건널_엣지를_받는다() {
+        assert_eq!(
+            parse(&args(&[
+                "impact",
+                "common",
+                "--hop=2",
+                "--edges=depends_on"
+            ])),
+            Ok(Invocation::Run {
+                request: Request::Impact {
+                    target: "common".to_string(),
+                    hop: 2,
+                    edges: vec![EdgeKind::DependsOn],
+                },
+                for_human: false
+            })
+        );
+        for bad in ["--hop=-1", "--edges=implements"] {
+            assert!(matches!(
+                parse(&args(&["impact", "common", bad])),
+                Err(ParseError::InvalidArguments { .. })
+            ));
+        }
     }
 
     #[test]
