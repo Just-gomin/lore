@@ -10,6 +10,7 @@ pub mod error;
 pub mod frontmatter;
 pub mod git;
 pub mod graph;
+pub mod index;
 pub mod output;
 pub mod source;
 
