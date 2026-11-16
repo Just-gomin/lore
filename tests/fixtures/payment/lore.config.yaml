@@ -1,0 +1,9 @@
+version: 1
+
+project:
+  docs: docs
+
+channels:
+  - id: github
+    tool: lore-connector-github
+    sensitivity: normal

@@ -44,10 +44,10 @@ lore why features/note/lib/notes.ts --for-human
 
 ### 2. 소스 읽기
 
-- [ ] `lore.config.yaml`을 읽습니다. `project.docs`가 소스 폴더입니다.
-- [ ] `docs/specs`, `docs/decisions`, `docs/incidents`, `docs/sources`의 마크다운을 찾습니다. `docs/_templates`처럼 `_`로 시작하는 폴더와 `docs/plans`는 읽지 않습니다.
-- [ ] 머리말(`---` 사이의 YAML)을 종류별 구조체로 읽습니다. 항목은 기획서 2장의 템플릿을 따릅니다.
-- [ ] 오류는 모아서 한 번에 보고합니다. 파일 경로, 항목 이름, 이유를 담습니다.
+- [x] `lore.config.yaml`을 읽습니다. `project.docs`가 소스 폴더입니다.
+- [x] `docs/specs`, `docs/decisions`, `docs/incidents`, `docs/sources`의 마크다운을 찾습니다. `docs/_templates`처럼 `_`로 시작하는 폴더와 `docs/plans`는 읽지 않습니다.
+- [x] 머리말(`---` 사이의 YAML)을 종류별 구조체로 읽습니다. 항목은 기획서 2장의 템플릿을 따릅니다.
+- [x] 오류는 모아서 한 번에 보고합니다. 파일 경로, 항목 이름, 이유를 담습니다.
 
 완료 기준: 블로그의 문서 여섯 개와 고정 예제가 오류 없이 읽히고, 잘못된 고정 예제는 파일마다 기대한 오류를 냅니다.
 
