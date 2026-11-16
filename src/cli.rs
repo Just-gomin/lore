@@ -96,6 +96,11 @@ pub enum Request {
     },
     /// 기록 하나의 인자가 다른 요청보다 훨씬 커서 상자에 담는다.
     Add(Box<NewRecord>),
+    AddSource {
+        /// 입력 JSON 파일. 없으면 표준 입력에서 읽는다.
+        from: Option<String>,
+        date: Option<String>,
+    },
     /// 아직 구현하지 않은 명령.
     Pending(Command),
 }
@@ -128,6 +133,10 @@ impl Request {
                     .unwrap_or(Depth::Index),
             },
             Command::Add => match matches.subcommand() {
+                Some((SOURCE, sub)) => Request::AddSource {
+                    from: sub.get_one::<String>(FROM).cloned(),
+                    date: sub.get_one::<String>(DATE).cloned(),
+                },
                 Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
                 None => Request::Pending(Command::Add),
             },
@@ -206,6 +215,8 @@ const SUPERSEDES: &str = "supersedes";
 const STATUS: &str = "status";
 const CONFIDENCE: &str = "confidence";
 const DECISIONS: &str = "decisions";
+const SOURCE: &str = "source";
+const FROM: &str = "from";
 
 fn parse_slug(value: &str) -> Result<String, String> {
     if is_slug(value) {
@@ -286,6 +297,10 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                         .default_value("inferred"),
                 ),
             record_command(INCIDENT, "사고 기록 추가").arg(list_arg(DECISIONS)),
+            clap::Command::new(SOURCE)
+                .about("소스 노트 추가")
+                .arg(Arg::new(FROM).long(FROM).value_name("JSON 파일"))
+                .arg(Arg::new(DATE).long(DATE).value_parser(parse_date)),
         ]),
         _ => definition,
     }
@@ -563,6 +578,37 @@ mod tests {
         assert_eq!(record.status, "proposed");
         assert_eq!(record.confidence, "inferred");
         assert_eq!(record.date.as_deref(), Some("2026-11-12"));
+    }
+
+    #[test]
+    fn add_source는_입력_파일과_날짜를_받는다() {
+        assert_eq!(
+            parse(&args(&[
+                "add",
+                "source",
+                "--from",
+                "in.json",
+                "--date",
+                "2026-11-04"
+            ])),
+            Ok(Invocation::Run {
+                request: Request::AddSource {
+                    from: Some("in.json".to_string()),
+                    date: Some("2026-11-04".to_string()),
+                },
+                for_human: false
+            })
+        );
+        assert_eq!(
+            parse(&args(&["add", "source"])),
+            Ok(Invocation::Run {
+                request: Request::AddSource {
+                    from: None,
+                    date: None
+                },
+                for_human: false
+            })
+        );
     }
 
     #[test]

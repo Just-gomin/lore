@@ -15,6 +15,52 @@ pub struct Config {
     pub root: PathBuf,
     /// 소스 폴더. 프로젝트 홈 기준 경로다.
     pub docs: String,
+    /// 자료를 가져오는 채널. `lore add source` 입력의 `channel`과 짝을 이룬다.
+    pub channels: Vec<Channel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Channel {
+    pub id: String,
+    pub sensitivity: Sensitivity,
+}
+
+/// 출처별 민감도 등급. 기획서 2장의 세 등급이다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sensitivity {
+    Normal,
+    Sensitive,
+    Excluded,
+}
+
+impl Sensitivity {
+    pub fn from_name(name: &str) -> Option<Sensitivity> {
+        match name {
+            "normal" => Some(Sensitivity::Normal),
+            "sensitive" => Some(Sensitivity::Sensitive),
+            "excluded" => Some(Sensitivity::Excluded),
+            _ => None,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Sensitivity::Normal => "normal",
+            Sensitivity::Sensitive => "sensitive",
+            Sensitivity::Excluded => "excluded",
+        }
+    }
+}
+
+impl Config {
+    /// 채널의 등급. 설정에 없는 채널은 민감으로 다룬다.
+    pub fn sensitivity(&self, channel: &str) -> Sensitivity {
+        self.channels
+            .iter()
+            .find(|known| known.id == channel)
+            .map_or(Sensitivity::Sensitive, |known| known.sensitivity)
+    }
 }
 
 #[derive(Deserialize)]
@@ -22,6 +68,14 @@ struct RawConfig {
     version: Option<u32>,
     #[serde(default)]
     project: RawProject,
+    #[serde(default)]
+    channels: Vec<RawChannel>,
+}
+
+#[derive(Deserialize)]
+struct RawChannel {
+    id: String,
+    sensitivity: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -79,9 +133,27 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         )));
     }
 
+    let mut channels = Vec::new();
+    for raw in raw.channels {
+        let sensitivity = match raw.sensitivity.as_deref() {
+            None => Sensitivity::Sensitive,
+            Some(name) => Sensitivity::from_name(name).ok_or_else(|| {
+                invalid(format!(
+                    "채널 '{}'의 sensitivity '{name}'는 normal, sensitive, excluded 중 하나여야 합니다.",
+                    raw.id
+                ))
+            })?,
+        };
+        channels.push(Channel {
+            id: raw.id,
+            sensitivity,
+        });
+    }
+
     Ok(Config {
         root: root.to_path_buf(),
         docs,
+        channels,
     })
 }
 
@@ -97,6 +169,23 @@ mod tests {
     fn 모르는_항목은_무시하고_docs를_읽는다() {
         let text = "version: 1\nproject:\n  docs: notes/\nchannels:\n  - id: git\n";
         assert_eq!(config(text).unwrap().docs, "notes");
+    }
+
+    #[test]
+    fn 채널_등급을_읽고_없는_채널은_민감으로_본다() {
+        let text = "version: 1\nchannels:\n  - id: git\n    sensitivity: normal\n  - id: hr\n    sensitivity: excluded\n  - id: memo\n";
+        let config = config(text).unwrap();
+        assert_eq!(config.sensitivity("git"), Sensitivity::Normal);
+        assert_eq!(config.sensitivity("hr"), Sensitivity::Excluded);
+        assert_eq!(config.sensitivity("memo"), Sensitivity::Sensitive);
+        assert_eq!(config.sensitivity("kakaotalk"), Sensitivity::Sensitive);
+        assert!(matches!(
+            parse(
+                Path::new("/repo"),
+                "version: 1\nchannels:\n  - id: a\n    sensitivity: secret\n"
+            ),
+            Err(LoreError::InvalidConfig { .. })
+        ));
     }
 
     #[test]
