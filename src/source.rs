@@ -162,6 +162,18 @@ pub fn is_link(reference: &str) -> bool {
 
 /// 소스 폴더를 모두 읽는다. 문제가 하나라도 있으면 모든 문제를 돌려준다.
 pub fn read(config: &Config) -> Result<Corpus, LoreError> {
+    let (corpus, problems) = read_lenient(config);
+    if problems.is_empty() {
+        Ok(corpus)
+    } else {
+        Err(LoreError::InvalidSources { problems })
+    }
+}
+
+/// 소스 폴더를 모두 읽고, 읽어 낸 문서와 찾은 문제를 함께 돌려준다.
+///
+/// 문제가 있는 문서도 머리말을 읽을 수 있었다면 문서 목록에 든다.
+pub fn read_lenient(config: &Config) -> (Corpus, Vec<Problem>) {
     let mut problems = Vec::new();
     let mut documents = Vec::new();
 
@@ -183,14 +195,22 @@ pub fn read(config: &Config) -> Result<Corpus, LoreError> {
 
     let corpus = Corpus { documents };
     check_references(&corpus, &mut problems);
+    problems.sort();
+    problems.dedup();
+    (corpus, problems)
+}
 
-    if problems.is_empty() {
-        Ok(corpus)
-    } else {
-        problems.sort();
-        problems.dedup();
-        Err(LoreError::InvalidSources { problems })
-    }
+/// 아직 디스크에 없는 새 문서 하나의 참조를 기존 문서에 비춰 검사한다. 새 문서의 문제만 돌려준다.
+pub fn check_new(corpus: &Corpus, doc: &Document) -> Vec<Problem> {
+    let mut documents = corpus.documents.clone();
+    documents.push(doc.clone());
+    documents.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.path.cmp(&b.path)));
+    let mut problems = Vec::new();
+    check_references(&Corpus { documents }, &mut problems);
+    problems.retain(|problem| problem.path == doc.path);
+    problems.sort();
+    problems.dedup();
+    problems
 }
 
 /// `folder` 아래의 `.md` 파일을 찾는다. `_`나 `.`로 시작하는 항목은 건너뛴다.
@@ -253,7 +273,18 @@ fn read_document(
         }
     };
 
-    let Some((yaml, body)) = frontmatter::split(&text) else {
+    parse_document(path, &text, hash, kind, problems)
+}
+
+/// 문서 글자를 읽어 낸다. `path`는 문제에 적을 경로이고, 파일 이름과 ID가 같은지도 이 경로로 본다.
+pub fn parse_document(
+    path: &str,
+    text: &str,
+    hash: String,
+    kind: Kind,
+    problems: &mut Vec<Problem>,
+) -> Option<Document> {
+    let Some((yaml, body)) = frontmatter::split(text) else {
         problems.push(Problem::new(
             path,
             None,
@@ -514,7 +545,7 @@ pub fn id_date(id: &str) -> Option<String> {
     Some(format!("{}-{}-{}", &date[..4], &date[4..6], &date[6..8]))
 }
 
-fn is_slug(text: &str) -> bool {
+pub fn is_slug(text: &str) -> bool {
     !text.is_empty()
         && !text.starts_with('-')
         && !text.ends_with('-')
@@ -532,7 +563,7 @@ fn is_compact_date(text: &str) -> bool {
 }
 
 /// `YYYY-MM-DD`.
-fn is_iso_date(text: &str) -> bool {
+pub fn is_iso_date(text: &str) -> bool {
     let parts: Vec<&str> = text.split('-').collect();
     parts.len() == 3
         && parts[0].len() == 4

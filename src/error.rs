@@ -67,6 +67,11 @@ pub enum LoreError {
     Database {
         message: String,
     },
+    /// 만들려는 기록의 ID를 이미 쓰고 있다.
+    IdExists {
+        id: String,
+        path: String,
+    },
     /// 조회 대상에 해당하는 노드가 없다.
     TargetNotFound {
         target: String,
@@ -107,6 +112,10 @@ impl fmt::Display for LoreError {
             LoreError::Io { path, message } => write!(f, "{path}: {message}"),
             LoreError::Git { message } => write!(f, "git: {message}"),
             LoreError::Database { message } => write!(f, "디비: {message}"),
+            LoreError::IdExists { id, path } => write!(
+                f,
+                "ID '{id}'를 이미 씁니다({path}). 슬러그나 날짜를 바꾸세요."
+            ),
             LoreError::TargetNotFound { target } => write!(
                 f,
                 "'{target}'에 해당하는 기록이나 파일이 없습니다. ID나 스펙의 paths에 든 파일 경로를 넘기세요."

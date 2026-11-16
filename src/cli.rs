@@ -4,8 +4,10 @@ use std::ffi::OsString;
 
 use clap::{Arg, ArgAction, ColorChoice};
 
+use crate::add::NewRecord;
 use crate::graph::EdgeKind;
 use crate::impact::TRAVERSABLE;
+use crate::source::{Kind, is_iso_date, is_slug};
 use crate::why::Depth;
 
 /// lore가 제공하는 명령.
@@ -92,6 +94,8 @@ pub enum Request {
         hop: u32,
         edges: Vec<EdgeKind>,
     },
+    /// 기록 하나의 인자가 다른 요청보다 훨씬 커서 상자에 담는다.
+    Add(Box<NewRecord>),
     /// 아직 구현하지 않은 명령.
     Pending(Command),
 }
@@ -123,8 +127,58 @@ impl Request {
                     .and_then(|name| Depth::from_name(name))
                     .unwrap_or(Depth::Index),
             },
+            Command::Add => match matches.subcommand() {
+                Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
+                None => Request::Pending(Command::Add),
+            },
             other => Request::Pending(other),
         }
+    }
+}
+
+/// `lore add decision|incident`의 인자를 읽는다.
+fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
+    let one = |id: &str| matches.get_one::<String>(id).cloned();
+    let many = |id: &str| -> Vec<String> {
+        matches
+            .try_get_many::<String>(id)
+            .ok()
+            .flatten()
+            .into_iter()
+            .flatten()
+            .cloned()
+            .collect()
+    };
+    let kind = if name == DECISION {
+        Kind::Decision
+    } else {
+        Kind::Incident
+    };
+    NewRecord {
+        kind,
+        slug: one(SLUG).unwrap_or_default(),
+        title: one(TITLE).unwrap_or_default(),
+        specs: many(SPECS),
+        sources: many(SOURCES),
+        date: one(DATE),
+        supersedes: matches
+            .try_get_one::<String>(SUPERSEDES)
+            .ok()
+            .flatten()
+            .cloned(),
+        status: matches
+            .try_get_one::<String>(STATUS)
+            .ok()
+            .flatten()
+            .cloned()
+            .unwrap_or_else(|| "accepted".to_string()),
+        confidence: matches
+            .try_get_one::<String>(CONFIDENCE)
+            .ok()
+            .flatten()
+            .cloned()
+            .unwrap_or_else(|| "inferred".to_string()),
+        decisions: many(DECISIONS),
     }
 }
 
@@ -141,6 +195,54 @@ const TARGET: &str = "target";
 const DEPTH: &str = "depth";
 const HOP: &str = "hop";
 const EDGES: &str = "edges";
+const DECISION: &str = "decision";
+const INCIDENT: &str = "incident";
+const SLUG: &str = "slug";
+const TITLE: &str = "title";
+const SPECS: &str = "specs";
+const SOURCES: &str = "sources";
+const DATE: &str = "date";
+const SUPERSEDES: &str = "supersedes";
+const STATUS: &str = "status";
+const CONFIDENCE: &str = "confidence";
+const DECISIONS: &str = "decisions";
+
+fn parse_slug(value: &str) -> Result<String, String> {
+    if is_slug(value) {
+        Ok(value.to_string())
+    } else {
+        Err("영문 소문자, 숫자, -로 된 슬러그여야 합니다".to_string())
+    }
+}
+
+fn parse_date(value: &str) -> Result<String, String> {
+    if is_iso_date(value) {
+        Ok(value.to_string())
+    } else {
+        Err("YYYY-MM-DD 형식이어야 합니다".to_string())
+    }
+}
+
+/// 쉼표로 구분한 목록 인자.
+fn list_arg(id: &'static str) -> Arg {
+    Arg::new(id).long(id).value_delimiter(',').num_args(1)
+}
+
+/// 결정과 사고가 함께 받는 인자.
+fn record_command(name: &'static str, about: &'static str) -> clap::Command {
+    clap::Command::new(name)
+        .about(about)
+        .arg(
+            Arg::new(SLUG)
+                .long(SLUG)
+                .required(true)
+                .value_parser(parse_slug),
+        )
+        .arg(Arg::new(TITLE).long(TITLE).required(true))
+        .arg(list_arg(SPECS))
+        .arg(list_arg(SOURCES))
+        .arg(Arg::new(DATE).long(DATE).value_parser(parse_date))
+}
 
 /// 명령별 인자를 붙인다.
 fn with_arguments(command: Command, definition: clap::Command) -> clap::Command {
@@ -168,6 +270,23 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
+        Command::Add => definition.subcommand_required(true).subcommands([
+            record_command(DECISION, "결정 기록 추가")
+                .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
+                .arg(
+                    Arg::new(STATUS)
+                        .long(STATUS)
+                        .value_parser(["proposed", "accepted"])
+                        .default_value("accepted"),
+                )
+                .arg(
+                    Arg::new(CONFIDENCE)
+                        .long(CONFIDENCE)
+                        .value_parser(["stated", "inferred"])
+                        .default_value("inferred"),
+                ),
+            record_command(INCIDENT, "사고 기록 추가").arg(list_arg(DECISIONS)),
+        ]),
         _ => definition,
     }
 }
@@ -287,6 +406,21 @@ mod tests {
                         edges: TRAVERSABLE.to_vec(),
                     },
                 ),
+                Command::Add => (
+                    vec!["add", "incident", "--slug", "dup", "--title", "중복"],
+                    Request::Add(Box::new(NewRecord {
+                        kind: Kind::Incident,
+                        slug: "dup".to_string(),
+                        title: "중복".to_string(),
+                        specs: Vec::new(),
+                        sources: Vec::new(),
+                        date: None,
+                        supersedes: None,
+                        status: "accepted".to_string(),
+                        confidence: "inferred".to_string(),
+                        decisions: Vec::new(),
+                    })),
+                ),
                 other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
@@ -392,6 +526,69 @@ mod tests {
                 parse(&args(&["impact", "common", bad])),
                 Err(ParseError::InvalidArguments { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn add_decision은_목록을_쉼표로_받는다() {
+        let parsed = parse(&args(&[
+            "add",
+            "decision",
+            "--slug",
+            "retry-5",
+            "--title",
+            "재시도 5회",
+            "--specs",
+            "payment-retry,payment-core",
+            "--supersedes",
+            "ADR-20261105-retry-queue",
+            "--status",
+            "proposed",
+            "--date",
+            "2026-11-12",
+        ]));
+        let Ok(Invocation::Run {
+            request: Request::Add(record),
+            ..
+        }) = parsed
+        else {
+            panic!("add가 아니다: {parsed:?}");
+        };
+        assert_eq!(record.kind, Kind::Decision);
+        assert_eq!(record.specs, ["payment-retry", "payment-core"]);
+        assert_eq!(
+            record.supersedes.as_deref(),
+            Some("ADR-20261105-retry-queue")
+        );
+        assert_eq!(record.status, "proposed");
+        assert_eq!(record.confidence, "inferred");
+        assert_eq!(record.date.as_deref(), Some("2026-11-12"));
+    }
+
+    #[test]
+    fn add의_잘못된_인자는_사용법_오류다() {
+        for bad in [
+            vec!["add"],
+            vec!["add", "decision", "--title", "제목"],
+            vec!["add", "decision", "--slug", "Retry", "--title", "제목"],
+            vec![
+                "add", "decision", "--slug", "a", "--title", "제목", "--date", "2026-1-2",
+            ],
+            vec![
+                "add",
+                "incident",
+                "--slug",
+                "a",
+                "--title",
+                "제목",
+                "--supersedes",
+                "X",
+            ],
+        ] {
+            assert!(
+                matches!(parse(&args(&bad)), Err(ParseError::InvalidArguments { .. })),
+                "{bad:?}"
+            );
         }
     }
 
