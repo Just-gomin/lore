@@ -4,6 +4,8 @@ use std::ffi::OsString;
 
 use clap::{Arg, ArgAction, ColorChoice};
 
+use crate::why::Depth;
+
 /// lore가 제공하는 명령.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -79,14 +81,28 @@ pub enum Invocation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     Build,
+    Why {
+        target: String,
+        depth: Depth,
+    },
     /// 아직 구현하지 않은 명령.
     Pending(Command),
 }
 
 impl Request {
-    fn from_matches(command: Command, _matches: &clap::ArgMatches) -> Request {
+    fn from_matches(command: Command, matches: &clap::ArgMatches) -> Request {
         match command {
             Command::Build => Request::Build,
+            Command::Why => Request::Why {
+                target: matches
+                    .get_one::<String>(TARGET)
+                    .cloned()
+                    .unwrap_or_default(),
+                depth: matches
+                    .get_one::<String>(DEPTH)
+                    .and_then(|name| Depth::from_name(name))
+                    .unwrap_or(Depth::Index),
+            },
             other => Request::Pending(other),
         }
     }
@@ -101,14 +117,34 @@ pub enum ParseError {
 const FOR_HUMAN: &str = "for-human";
 const HELP: &str = "help";
 const VERSION: &str = "version";
+const TARGET: &str = "target";
+const DEPTH: &str = "depth";
+
+/// 명령별 인자를 붙인다.
+fn with_arguments(command: Command, definition: clap::Command) -> clap::Command {
+    match command {
+        Command::Why => definition
+            .arg(Arg::new(TARGET).required(true).value_name("ID | 파일 경로"))
+            .arg(
+                Arg::new(DEPTH)
+                    .long(DEPTH)
+                    .value_parser(Depth::NAMES)
+                    .default_value("index"),
+            ),
+        _ => definition,
+    }
+}
 
 /// clap 명령 트리. 하위 명령은 [`Command::ALL`]에서 만든다.
 ///
 /// clap이 직접 만드는 도움말과 버전 출력은 끈다. 출력 형식은 `output`이 정한다.
 fn definition() -> clap::Command {
-    let subcommands = Command::ALL
-        .into_iter()
-        .map(|command| clap::Command::new(command.name()).about(command.summary()));
+    let subcommands = Command::ALL.into_iter().map(|command| {
+        with_arguments(
+            command,
+            clap::Command::new(command.name()).about(command.summary()),
+        )
+    });
 
     clap::Command::new("lore")
         .disable_help_flag(true)
@@ -141,7 +177,7 @@ fn definition() -> clap::Command {
 
 /// 프로그램 이름을 뺀 인자를 해석한다.
 ///
-/// `--for-human`은 어느 위치에 있어도 받는다. 명령별 옵션은 아직 없다.
+/// `--for-human`은 어느 위치에 있어도 받는다.
 pub fn parse(args: &[String]) -> Result<Invocation, ParseError> {
     let argv = std::iter::once("lore").chain(args.iter().map(String::as_str));
     let matches =
@@ -197,12 +233,19 @@ mod tests {
     #[test]
     fn 모든_명령_이름을_알아본다() {
         for command in Command::ALL {
-            let expected = match command {
-                Command::Build => Request::Build,
-                other => Request::Pending(other),
+            let (argv, expected) = match command {
+                Command::Build => (vec!["build"], Request::Build),
+                Command::Why => (
+                    vec!["why", "payment-retry"],
+                    Request::Why {
+                        target: "payment-retry".to_string(),
+                        depth: Depth::Index,
+                    },
+                ),
+                other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
-                parse(&args(&[command.name()])),
+                parse(&args(&argv)),
                 Ok(Invocation::Run {
                     request: expected,
                     for_human: false
@@ -257,6 +300,28 @@ mod tests {
                 Ok(Invocation::Version { for_human: true })
             );
         }
+    }
+
+    #[test]
+    fn why는_대상과_깊이를_받는다() {
+        assert_eq!(
+            parse(&args(&["why", "a.ts", "--depth", "source"])),
+            Ok(Invocation::Run {
+                request: Request::Why {
+                    target: "a.ts".to_string(),
+                    depth: Depth::Source,
+                },
+                for_human: false
+            })
+        );
+        assert!(matches!(
+            parse(&args(&["why"])),
+            Err(ParseError::InvalidArguments { .. })
+        ));
+        assert!(matches!(
+            parse(&args(&["why", "a.ts", "--depth=all"])),
+            Err(ParseError::InvalidArguments { .. })
+        ));
     }
 
     #[test]
