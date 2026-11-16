@@ -166,12 +166,27 @@ lore add decision --slug retry-5 --title "재시도를 최대 5회로 늘린다"
 
 ## 끝나면
 
-- 블로그 레포에 `lore install`을 실행하고 `docs/_templates/`를 지우는 PR을 올립니다. 다른 레포를 바꾸는 일이므로 사람에게 먼저 묻습니다.
-- 블로그의 실제 PR 5건에 스킬로 기록 초안을 붙이고, 아래 표에 결과를 적습니다.
-- 쓰면서 불편했던 형식을 기획서에 반영합니다.
-- 4단계 작업 지시서를 씁니다.
+- [x] 블로그 레포에 `lore install`을 실행하고 `docs/_templates/`를 지우는 PR을 올립니다(Just-gomin/Just-gomin.github.io#24). 스펙 템플릿은 대신할 명령이 없어 남겼습니다. 블로그 CI가 `main`의 lint 오류로 실패하고 있어 먼저 고쳤습니다(#23).
+- [x] 블로그의 실제 PR 5건에 스킬로 기록 초안을 붙이고, 아래 표에 결과를 적습니다.
+- [ ] 사람이 다섯 기록을 검토하고, 고친 정도를 표에 적습니다. 레포 주인이 작업 선택과 병합을 맡겨 PR은 CI 통과 뒤 병합했으므로 사람의 검토는 병합 뒤에 합니다.
+- [x] 쓰면서 불편했던 형식을 반영합니다. 실제 PR에서 나온 지적은 스킬과 안내문에 반영했습니다(아래 "실제 PR에서 나온 지적").
+- [x] 4단계 작업 지시서를 씁니다: [stage-4.md](stage-4.md)
 
 ### 실제 PR 기록
 
+작업은 블로그 스펙의 "아직 동작하지 않는 것"과 CI의 TODO에서 골랐습니다. 구현과 기록은 서브에이전트가 설치된 `lore-record` 스킬 파일만 읽고 했습니다.
+
 | PR | 초안 | 사람이 고친 정도 |
 | --- | --- | --- |
+| [#25](https://github.com/Just-gomin/Just-gomin.github.io/pull/25) 잘못된 노트 날짜는 빌드 실패 | `ADR-20261117-fail-build-on-invalid-note-date`, `note` 스펙 | 검토 전 |
+| [#26](https://github.com/Just-gomin/Just-gomin.github.io/pull/26) Vitest 도입 | `ADR-20261117-vitest-test-runner`, `note`·`build` 스펙 | 검토 전 |
+| [#27](https://github.com/Just-gomin/Just-gomin.github.io/pull/27) 태그 필터 | `ADR-20261117-tag-filter-url-query`, `note` 스펙 | 검토 전 |
+| [#28](https://github.com/Just-gomin/Just-gomin.github.io/pull/28) `coverImage` 제거 | `ADR-20261117-remove-note-cover-image`, `note` 스펙 | 검토 전 |
+| [#29](https://github.com/Just-gomin/Just-gomin.github.io/pull/29) 같은 날짜 정렬 | `ADR-20261117-note-sort-slug-tiebreak`, `note` 스펙 | 검토 전 |
+
+### 실제 PR에서 나온 지적
+
+- `confidence`: 사람이 선택을 맡겨 에이전트가 낸 이유를 어떻게 볼지 다섯 번 모두 같은 질문이 나왔습니다. 다섯 기록은 모두 `inferred`로 두고 본문에 이유를 누가 냈는지 밝혔습니다. 스킬에 "사람이 이유를 직접 밝혔거나 읽고 승인하면 `stated`, 선택을 맡겨 이유를 확인하지 않았으면 `inferred`"를 적었습니다.
+- `lore build`가 스펙의 `paths`, `tests`를 git이 추적하는 파일에만 맞추므로 새 테스트 파일은 `git add` 전에 `no_matching_files`로 실패했습니다. 스킬과 안내문에 적었습니다.
+- 스펙 본문을 고칠 범위가 모호했습니다. 기능을 없앤 경우, 다른 스펙(빌드)이 설명하는 동작이 바뀐 경우, `tests`에 무엇을 적는지, 결정의 `--specs`를 어디로 할지를 스킬에 적었습니다.
+- 설계에 없던 구현 판단을 별도 결정으로 쓸지 기준이 없었습니다. "고를 만한 대안이 있었을 때만 별도 결정"으로 정했습니다.
