@@ -4,8 +4,8 @@
 
 ## 먼저 읽을 문서
 
-- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른한 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
-- [`docs/plan/stage-3.md`](docs/plan/stage-3.md): 지금 하고 있는 3단계의 작업 순서와 완료 기준입니다. 끝난 2단계는 [`stage-2.md`](docs/plan/stage-2.md)에 있습니다.
+- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른두 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
+- [`docs/plan/stage-4.md`](docs/plan/stage-4.md): 지금 하고 있는 4단계의 작업 순서와 완료 기준입니다. 끝난 단계는 [`stage-2.md`](docs/plan/stage-2.md), [`stage-3.md`](docs/plan/stage-3.md)에 있습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
 
@@ -36,6 +36,7 @@
 | `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
 | `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬 |
+| `src/check.rs`       | `lore check`: 소스와 코드가 어긋났는지 검사          |
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
@@ -50,6 +51,7 @@
 | `tests/install.rs`   | 빈 레포와 기존 파일로 `lore install`을 확인하는 테스트 |
 | `tests/uninstall.rs` | 설치한 것만 걷어내는지 확인하는 테스트               |
 | `tests/skills.rs`    | 스킬과 안내문의 명령 예시가 해석되는지 확인          |
+| `tests/check.rs`     | 고정 예제로 `lore check`를 확인하는 테스트           |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |

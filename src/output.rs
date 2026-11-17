@@ -112,6 +112,26 @@ pub fn success<T: Serialize>(
     }
 }
 
+/// 검사처럼 끝까지 실행했지만 결과가 통과가 아닐 수 있는 명령. 통과하지 못하면 종료 코드 1이다.
+///
+/// 결과는 통과 여부와 상관없이 표준 출력으로 낸다. 사람용 텍스트도 마찬가지다.
+pub fn verdict<T: Serialize>(
+    report: &T,
+    passed: bool,
+    for_human: bool,
+    text: impl FnOnce(&T) -> String,
+) -> Outcome {
+    Outcome {
+        stdout: if for_human {
+            text(report)
+        } else {
+            to_json(&SuccessJson { ok: passed, report })
+        },
+        stderr: String::new(),
+        code: if passed { 0 } else { 1 },
+    }
+}
+
 /// 명령이 실행 중에 실패했을 때.
 pub fn error(error: &LoreError, for_human: bool) -> Outcome {
     Outcome::fail_with(
