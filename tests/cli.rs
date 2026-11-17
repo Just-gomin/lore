@@ -59,18 +59,18 @@ fn 도움말에_모든_명령이_나온다() {
 
 #[test]
 fn 구현_전_명령은_json_오류와_종료_코드_2를_낸다() {
-    let output = lore(&["check"]);
+    let output = lore(&["sync"]);
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(
         stdout(&output).trim(),
-        r#"{"ok":false,"error":{"code":"not_implemented","command":"check"}}"#
+        r#"{"ok":false,"error":{"code":"not_implemented","command":"sync"}}"#
     );
     assert!(stderr(&output).is_empty());
 }
 
 #[test]
 fn for_human이면_오류를_표준_오류로_낸다() {
-    let output = lore(&["check", "--for-human"]);
+    let output = lore(&["sync", "--for-human"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stdout(&output).is_empty());
     assert!(stderr(&output).contains("아직 구현되지 않았습니다"));

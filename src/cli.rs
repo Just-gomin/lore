@@ -85,6 +85,7 @@ pub enum Invocation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     Build,
+    Check,
     Why {
         target: String,
         depth: Depth,
@@ -118,6 +119,7 @@ impl Request {
     fn from_matches(command: Command, matches: &clap::ArgMatches) -> Request {
         match command {
             Command::Build => Request::Build,
+            Command::Check => Request::Check,
             Command::Impact => Request::Impact {
                 target: matches
                     .get_one::<String>(TARGET)
@@ -446,6 +448,7 @@ mod tests {
         for command in Command::ALL {
             let (argv, expected) = match command {
                 Command::Build => (vec!["build"], Request::Build),
+                Command::Check => (vec!["check"], Request::Check),
                 Command::Why => (
                     vec!["why", "payment-retry"],
                     Request::Why {
