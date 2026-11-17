@@ -2,7 +2,9 @@
 //!
 //! 지금은 기계적 검사만 있다. 판단이 없는 검사라 실패하면 병합을 막는다.
 
-use serde::Serialize;
+use std::collections::BTreeMap;
+
+use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
 use crate::error::{LoreError, Problem};
@@ -34,7 +36,7 @@ impl Status {
 
 #[derive(Debug, Serialize)]
 pub struct Check {
-    /// 검사 이름. `paths`, `references`, `frontmatter`, `index`, `guide`
+    /// 검사 이름. `paths`, `references`, `frontmatter`, `freshness`, `index`, `guide`
     pub id: &'static str,
     /// 사람용 이름. 기획서 5장의 검사 이름과 같다.
     pub label: &'static str,
@@ -49,6 +51,9 @@ pub struct Check {
     /// 건너뛴 이유.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reason: Option<&'static str>,
+    /// 확인하지 못하고 넘어간 항목의 수. 신선도 검사에서 목록에 없는 원본이다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unchecked: Option<usize>,
 }
 
 impl Check {
@@ -68,6 +73,20 @@ impl Check {
             problems,
             fix: failed.then_some(fix),
             reason: None,
+            unchecked: None,
+        }
+    }
+
+    fn skipped(id: &'static str, label: &'static str, reason: &'static str) -> Check {
+        Check {
+            id,
+            label,
+            status: Status::Skip,
+            blocking: true,
+            problems: Vec::new(),
+            fix: None,
+            reason: Some(reason),
+            unchecked: None,
         }
     }
 }
@@ -97,7 +116,7 @@ fn check_of(code: &str) -> &'static str {
     }
 }
 
-pub fn check(config: &Config) -> Result<CheckReport, LoreError> {
+pub fn check(config: &Config, origins: Option<&Origins>) -> Result<CheckReport, LoreError> {
     let (corpus, mut problems) = source::read_lenient(config);
     let files = git::tracked_files(&config.root)?;
     if let Err(more) = graph::build(&corpus, &config.root, &files) {
@@ -133,10 +152,86 @@ pub fn check(config: &Config) -> Result<CheckReport, LoreError> {
             of("frontmatter"),
             "문제에 적힌 머리말 항목을 고치세요.",
         ),
+        freshness_check(&corpus, origins),
         index_check(config, &corpus, sources_ok)?,
         guide_check(config)?,
     ];
     Ok(CheckReport { checks })
+}
+
+/// 원본의 최신 판 목록. 원본 링크 → 판(해시나 수정 시각).
+///
+/// 원본을 읽으려면 네트워크가 필요하므로 코어는 목록을 받아 비교만 한다. 목록은 커넥터가 만든다.
+pub type Origins = BTreeMap<String, String>;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct OriginEntry {
+    origin: String,
+    origin_version: String,
+}
+
+/// `--origins` 파일을 읽는다. `[{"origin": "...", "origin_version": "..."}]` 꼴이다.
+pub fn parse_origins(name: &str, text: &str) -> Result<Origins, LoreError> {
+    let invalid = |code, message: String| LoreError::InvalidInput {
+        problems: vec![Problem::new(name, None, code, message)],
+    };
+    let entries: Vec<OriginEntry> =
+        serde_json::from_str(text).map_err(|error| invalid("invalid_json", error.to_string()))?;
+    let mut origins = Origins::new();
+    for entry in entries {
+        if let Some(old) = origins.get(&entry.origin)
+            && *old != entry.origin_version
+        {
+            return Err(invalid(
+                "duplicate_origin",
+                format!("원본 '{}'의 판이 두 가지로 적혀 있습니다.", entry.origin),
+            ));
+        }
+        origins.insert(entry.origin, entry.origin_version);
+    }
+    Ok(origins)
+}
+
+/// 소스 노트에 적힌 원본의 판이 목록의 최신 판과 같은지.
+fn freshness_check(corpus: &source::Corpus, origins: Option<&Origins>) -> Check {
+    const ID: &str = "freshness";
+    const LABEL: &str = "소스 노트 신선도";
+    let Some(origins) = origins else {
+        return Check::skipped(
+            ID,
+            LABEL,
+            "--origins로 원본의 최신 판 목록을 주지 않았습니다.",
+        );
+    };
+    let mut problems = Vec::new();
+    let mut unchecked = 0;
+    for doc in corpus.of_kind(source::Kind::Source) {
+        let source::Record::Source(note) = &doc.record else {
+            continue;
+        };
+        match origins.get(&note.origin) {
+            None => unchecked += 1,
+            Some(latest) if *latest != note.origin_version => problems.push(Problem::new(
+                &doc.path,
+                Some("origin_version"),
+                "stale_source",
+                format!(
+                    "원본의 판이 '{latest}'로 바뀌었습니다. 소스 노트는 '{}'에서 추출했습니다.",
+                    note.origin_version
+                ),
+            )),
+            Some(_) => {}
+        }
+    }
+    let mut check = Check::blocking(
+        ID,
+        LABEL,
+        problems,
+        "원본을 다시 정제해 lore add source로 소스 노트를 갱신하세요.",
+    );
+    check.unchecked = (unchecked > 0).then_some(unchecked);
+    check
 }
 
 /// 커밋된 인덱스가 소스에서 다시 만든 결과와 같은지.
@@ -147,15 +242,11 @@ fn index_check(
 ) -> Result<Check, LoreError> {
     let path = format!("{}/{}", config.docs, index::FILE_NAME);
     if !sources_ok {
-        return Ok(Check {
-            id: "index",
-            label: "인덱스 일치",
-            status: Status::Skip,
-            blocking: true,
-            problems: Vec::new(),
-            fix: None,
-            reason: Some("소스에 문제가 있어 인덱스를 다시 만들 수 없습니다."),
-        });
+        return Ok(Check::skipped(
+            "index",
+            "인덱스 일치",
+            "소스에 문제가 있어 인덱스를 다시 만들 수 없습니다.",
+        ));
     }
     let expected = index::render(corpus, &config.docs);
     let problem = match read(config, &path)? {
@@ -255,6 +346,9 @@ pub fn render(report: &CheckReport) -> String {
             }
             if let Some(reason) = check.reason {
                 text.push_str(&format!("\n  {reason}"));
+            }
+            if let Some(count) = check.unchecked {
+                text.push_str(&format!("\n  목록에 없어 확인하지 못한 원본 {count}건"));
             }
         }
     }

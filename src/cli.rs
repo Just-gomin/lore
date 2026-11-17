@@ -85,7 +85,10 @@ pub enum Invocation {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Request {
     Build,
-    Check,
+    Check {
+        /// 원본의 최신 판 목록 파일.
+        origins: Option<String>,
+    },
     Why {
         target: String,
         depth: Depth,
@@ -119,7 +122,9 @@ impl Request {
     fn from_matches(command: Command, matches: &clap::ArgMatches) -> Request {
         match command {
             Command::Build => Request::Build,
-            Command::Check => Request::Check,
+            Command::Check => Request::Check {
+                origins: matches.get_one::<String>(ORIGINS).cloned(),
+            },
             Command::Impact => Request::Impact {
                 target: matches
                     .get_one::<String>(TARGET)
@@ -237,6 +242,7 @@ const DECISIONS: &str = "decisions";
 const SOURCE: &str = "source";
 const FROM: &str = "from";
 const DRY_RUN: &str = "dry-run";
+const ORIGINS: &str = "origins";
 const NO_SKILLS: &str = "no-skills";
 const WITH_CONFIG: &str = "with-config";
 
@@ -303,6 +309,7 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
+        Command::Check => definition.arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일")),
         Command::Uninstall => definition
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
             .arg(
@@ -448,7 +455,7 @@ mod tests {
         for command in Command::ALL {
             let (argv, expected) = match command {
                 Command::Build => (vec!["build"], Request::Build),
-                Command::Check => (vec!["check"], Request::Check),
+                Command::Check => (vec!["check"], Request::Check { origins: None }),
                 Command::Why => (
                     vec!["why", "payment-retry"],
                     Request::Why {

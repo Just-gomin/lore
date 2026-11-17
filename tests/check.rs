@@ -208,11 +208,14 @@ fn 사람용_출력은_실패를_먼저_보여_주고_표준_출력으로_낸다
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         stdout(&output),
-        "lore check: 실패 1, 통과 4
+        "lore check: 실패 1, 건너뜀 1, 통과 4
 
 실패  인덱스 일치
   docs/INDEX.md 인덱스 파일이 없습니다.
   고치려면: lore build를 실행하고 바뀐 인덱스를 커밋하세요.
+
+건너뜀  소스 노트 신선도
+  --origins로 원본의 최신 판 목록을 주지 않았습니다.
 
 통과  경로 유효성
 
@@ -236,4 +239,87 @@ fn 잘못된_고정_예제는_문제를_검사별로_나눈다() {
         assert_eq!(status_of(&report, id), "fail", "{id}");
         assert_eq!(codes(&report, id).len(), count, "{id}");
     }
+}
+
+const THREAD: (&str, &str) = (
+    "https://example.slack.com/archives/C1/p1",
+    "2026-10-20T18:00:00+09:00",
+);
+const MEETING: (&str, &str) = (
+    "https://drive.google.com/file/d/retry-meeting",
+    "2026-11-03T10:20:00+09:00",
+);
+
+/// 원본의 최신 판 목록을 파일로 쓰고 `lore check --origins`를 실행한다.
+fn check_with_origins(dir: &Path, origins: &[(&str, &str)]) -> (Option<i32>, Value) {
+    let entries: Vec<Value> = origins
+        .iter()
+        .map(|(origin, version)| serde_json::json!({"origin": origin, "origin_version": version}))
+        .collect();
+    let file = dir.join(".lore-origins.json");
+    std::fs::write(&file, Value::Array(entries).to_string()).unwrap();
+    let output = lore_in(dir, &["check", "--origins", ".lore-origins.json"]);
+    std::fs::remove_file(file).unwrap();
+    (output.status.code(), json(&output))
+}
+
+#[test]
+fn 원본_목록을_주지_않으면_신선도는_건너뛴다() {
+    let dir = clean_repo();
+    let output = lore_in(dir.path(), &["check"]);
+    assert_eq!(output.status.code(), Some(0));
+    let report = json(&output);
+    assert_eq!(status_of(&report, "freshness"), "skip");
+    assert!(check_of(&report, "freshness")["reason"].is_string());
+}
+
+#[test]
+fn 원본의_판이_소스_노트와_같으면_신선도_통과다() {
+    let dir = clean_repo();
+    let (code, report) = check_with_origins(dir.path(), &[THREAD, MEETING]);
+    assert_eq!(code, Some(0));
+    assert_eq!(status_of(&report, "freshness"), "pass");
+    assert!(check_of(&report, "freshness").get("unchecked").is_none());
+}
+
+#[test]
+fn 원본의_판이_바뀌었으면_신선도_실패다() {
+    let dir = clean_repo();
+    let newer = (MEETING.0, "2026-11-12T09:00:00+09:00");
+    let (code, report) = check_with_origins(dir.path(), &[THREAD, newer]);
+    assert_eq!(code, Some(1));
+    assert_eq!(status_of(&report, "freshness"), "fail");
+    let problems = check_of(&report, "freshness")["problems"]
+        .as_array()
+        .unwrap();
+    assert_eq!(problems.len(), 1);
+    assert_eq!(
+        problems[0]["path"],
+        "docs/sources/SRC-20261103-retry-meeting.md"
+    );
+    assert_eq!(problems[0]["field"], "origin_version");
+    assert_eq!(problems[0]["code"], "stale_source");
+}
+
+#[test]
+fn 목록에_없는_원본은_건수만_알리고_넘어간다() {
+    let dir = clean_repo();
+    let (code, report) = check_with_origins(dir.path(), &[THREAD]);
+    assert_eq!(code, Some(0));
+    assert_eq!(status_of(&report, "freshness"), "pass");
+    assert_eq!(check_of(&report, "freshness")["unchecked"], 1);
+}
+
+#[test]
+fn 원본_목록의_형식이_틀리면_invalid_input이다() {
+    let dir = clean_repo();
+    std::fs::write(dir.path().join("o.json"), r#"{"origin": "a"}"#).unwrap();
+    let output = lore_in(dir.path(), &["check", "--origins", "o.json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let report = json(&output);
+    assert_eq!(report["error"]["code"], "invalid_input");
+    assert_eq!(report["error"]["problems"][0]["path"], "o.json");
+
+    let (_, report) = check_with_origins(dir.path(), &[THREAD, (THREAD.0, "다른 판")]);
+    assert_eq!(report["error"]["problems"][0]["code"], "duplicate_origin");
 }
