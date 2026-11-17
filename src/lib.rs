@@ -5,6 +5,7 @@
 pub mod add;
 pub mod add_source;
 pub mod build;
+pub mod check;
 pub mod cli;
 pub mod config;
 pub mod db;
@@ -84,6 +85,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Add(record) => config::discover(cwd)
             .and_then(|config| add::add(&config, &record))
             .map(|report| output::success(&report, for_human, add::render_report)),
+        Request::Check => config::discover(cwd)
+            .and_then(|config| check::check(&config))
+            .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
         Request::Uninstall {
             dry_run,
             with_config,
