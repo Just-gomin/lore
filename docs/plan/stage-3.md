@@ -168,7 +168,7 @@ lore add decision --slug retry-5 --title "재시도를 최대 5회로 늘린다"
 
 - [x] 블로그 레포에 `lore install`을 실행하고 `docs/_templates/`를 지우는 PR을 올립니다(Just-gomin/Just-gomin.github.io#24). 스펙 템플릿은 대신할 명령이 없어 남겼습니다. 블로그 CI가 `main`의 lint 오류로 실패하고 있어 먼저 고쳤습니다(#23).
 - [x] 블로그의 실제 PR 5건에 스킬로 기록 초안을 붙이고, 아래 표에 결과를 적습니다.
-- [ ] 사람이 다섯 기록을 검토하고, 고친 정도를 표에 적습니다. 레포 주인이 작업 선택과 병합을 맡겨 PR은 CI 통과 뒤 병합했으므로 사람의 검토는 병합 뒤에 합니다.
+- [x] 사람이 다섯 기록을 검토하고, 고친 정도를 표에 적습니다. 레포 주인이 작업 선택과 병합을 맡겨 PR은 CI 통과 뒤 병합했고, 검토는 병합 뒤에 했습니다. 2026-11-17에 다섯 건 모두 고칠 것 없이 승인되어 3단계의 완료 기준을 채웠습니다.
 - [x] 쓰면서 불편했던 형식을 반영합니다. 실제 PR에서 나온 지적은 스킬과 안내문에 반영했습니다(아래 "실제 PR에서 나온 지적").
 - [x] 4단계 작업 지시서를 씁니다: [stage-4.md](stage-4.md)
 
@@ -178,11 +178,11 @@ lore add decision --slug retry-5 --title "재시도를 최대 5회로 늘린다"
 
 | PR | 초안 | 사람이 고친 정도 |
 | --- | --- | --- |
-| [#25](https://github.com/Just-gomin/Just-gomin.github.io/pull/25) 잘못된 노트 날짜는 빌드 실패 | `ADR-20261117-fail-build-on-invalid-note-date`, `note` 스펙 | 검토 전 |
-| [#26](https://github.com/Just-gomin/Just-gomin.github.io/pull/26) Vitest 도입 | `ADR-20261117-vitest-test-runner`, `note`·`build` 스펙 | 검토 전 |
-| [#27](https://github.com/Just-gomin/Just-gomin.github.io/pull/27) 태그 필터 | `ADR-20261117-tag-filter-url-query`, `note` 스펙 | 검토 전 |
-| [#28](https://github.com/Just-gomin/Just-gomin.github.io/pull/28) `coverImage` 제거 | `ADR-20261117-remove-note-cover-image`, `note` 스펙 | 검토 전 |
-| [#29](https://github.com/Just-gomin/Just-gomin.github.io/pull/29) 같은 날짜 정렬 | `ADR-20261117-note-sort-slug-tiebreak`, `note` 스펙 | 검토 전 |
+| [#25](https://github.com/Just-gomin/Just-gomin.github.io/pull/25) 잘못된 노트 날짜는 빌드 실패 | `ADR-20261117-fail-build-on-invalid-note-date`, `note` 스펙 | 그대로 승인 |
+| [#26](https://github.com/Just-gomin/Just-gomin.github.io/pull/26) Vitest 도입 | `ADR-20261117-vitest-test-runner`, `note`·`build` 스펙 | 그대로 승인 |
+| [#27](https://github.com/Just-gomin/Just-gomin.github.io/pull/27) 태그 필터 | `ADR-20261117-tag-filter-url-query`, `note` 스펙 | 그대로 승인 |
+| [#28](https://github.com/Just-gomin/Just-gomin.github.io/pull/28) `coverImage` 제거 | `ADR-20261117-remove-note-cover-image`, `note` 스펙 | 그대로 승인 |
+| [#29](https://github.com/Just-gomin/Just-gomin.github.io/pull/29) 같은 날짜 정렬 | `ADR-20261117-note-sort-slug-tiebreak`, `note` 스펙 | 그대로 승인 |
 
 ### 실제 PR에서 나온 지적
 
