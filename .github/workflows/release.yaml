@@ -29,8 +29,11 @@ jobs:
       - name: "릴리스 만들기"
         env:
           GH_TOKEN: ${{ github.token }}
-        # 바이너리를 모두 올린 뒤 게시하도록 초안으로 만듭니다.
-        run: gh release create "${GITHUB_REF_NAME}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+        # 바이너리를 모두 올린 뒤 게시하도록 초안으로 만듭니다. 다시 돌릴 때는 있는 릴리스를 씁니다.
+        run: |
+          if ! gh release view "${GITHUB_REF_NAME}" > /dev/null 2>&1; then
+            gh release create "${GITHUB_REF_NAME}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+          fi
 
   build:
     needs: release
@@ -40,7 +43,7 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
 
     runs-on: ${{ matrix.os }}
