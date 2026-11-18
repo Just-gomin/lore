@@ -44,6 +44,13 @@ pub const SKILLS: [(&str, &str); 3] = [
 pub const SKILL_DIR: &str = ".claude/skills";
 const HASH_KEY: &str = "metadata:\n  lore-hash: ";
 
+/// `lore check`를 PR마다 돌리는 GitHub Actions 워크플로.
+pub const WORKFLOW_FILE: &str = ".github/workflows/lore.yml";
+const WORKFLOW_TEMPLATE: &str = include_str!("../templates/lore-workflow.yml");
+/// 워크플로가 바이너리를 내려받는 릴리스의 레포.
+pub const RELEASE_REPO: &str = "Just-gomin/lore";
+const WORKFLOW_HASH: &str = "# lore-hash: ";
+
 pub const AGENTS_FILE: &str = "AGENTS.md";
 /// 이미 있을 때만 한 줄을 넣는 도구별 파일.
 pub const TOOL_FILES: [&str; 2] = ["CLAUDE.md", "GEMINI.md"];
@@ -102,7 +109,14 @@ pub fn project_root(cwd: &Path) -> Result<PathBuf, LoreError> {
         })
 }
 
-pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport, LoreError> {
+/// 설치할 것. `--no-skills`, `--no-ci`로 끈다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Parts {
+    pub skills: bool,
+    pub ci: bool,
+}
+
+pub fn install(cwd: &Path, dry_run: bool, parts: Parts) -> Result<InstallReport, LoreError> {
     let root = project_root(cwd)?;
     let mut plan = Plan::new(&root, dry_run);
 
@@ -135,7 +149,7 @@ pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport,
         }
     }
 
-    if skills {
+    if parts.skills {
         for (name, template) in SKILLS {
             let path = skill_path(name);
             let text = installed_skill(template);
@@ -149,6 +163,17 @@ pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport,
         }
     }
 
+    if parts.ci {
+        let text = installed_workflow();
+        match plan.read(WORKFLOW_FILE)? {
+            // 사람이 고친 워크플로는 덮어쓰지 않는다.
+            Some(old) if old != text && !workflow_untouched(&old) => {
+                plan.record(WORKFLOW_FILE, Change::Kept)
+            }
+            old => plan.write(WORKFLOW_FILE, old.as_deref(), &text)?,
+        }
+    }
+
     Ok(plan.finish())
 }
 
@@ -159,7 +184,29 @@ pub fn installed_files() -> Vec<String> {
         .map(str::to_string)
         .collect();
     files.extend(SKILLS.iter().map(|(name, _)| skill_path(name)));
+    files.push(WORKFLOW_FILE.to_string());
     files
+}
+
+/// 설치할 워크플로. 이 lore와 같은 버전의 릴리스 바이너리를 받는다.
+///
+/// 첫 줄에 나머지 내용의 해시를 적어, 다시 설치하거나 걷어낼 때 사람이 고쳤는지 본다.
+pub fn installed_workflow() -> String {
+    let body = WORKFLOW_TEMPLATE
+        .replace("{{LORE_VERSION}}", env!("CARGO_PKG_VERSION"))
+        .replace("{{LORE_REPO}}", RELEASE_REPO);
+    format!("{WORKFLOW_HASH}{}\n{body}", sha256_hex(body.as_bytes()))
+}
+
+/// 설치한 뒤 아무도 고치지 않은 워크플로인지. 예전 버전이 설치했어도 고치지 않았으면 참이다.
+pub fn workflow_untouched(text: &str) -> bool {
+    let Some(rest) = text.strip_prefix(WORKFLOW_HASH) else {
+        return false;
+    };
+    let Some((recorded, body)) = rest.split_once('\n') else {
+        return false;
+    };
+    sha256_hex(body.as_bytes()) == recorded
 }
 
 pub fn skill_path(name: &str) -> String {
@@ -381,6 +428,14 @@ pub fn uninstall(cwd: &Path, dry_run: bool, with_config: bool) -> Result<Install
             } else {
                 plan.record(&path, Change::Kept);
             }
+        }
+    }
+
+    if let Some(text) = plan.read(WORKFLOW_FILE)? {
+        if workflow_untouched(&text) {
+            plan.remove(WORKFLOW_FILE)?;
+        } else {
+            plan.record(WORKFLOW_FILE, Change::Kept);
         }
     }
 

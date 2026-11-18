@@ -51,6 +51,7 @@ fn 빈_레포에_설정_뼈대_안내문을_만들고_빌드가_된다() {
             (".claude/skills/lore-record/SKILL.md", "created"),
             (".claude/skills/lore-source/SKILL.md", "created"),
             (".claude/skills/lore-sync/SKILL.md", "created"),
+            (".github/workflows/lore.yml", "created"),
         ]
         .map(|(p, c)| (p.to_string(), c.to_string()))
     );
@@ -134,7 +135,7 @@ fn dry_run은_목록만_내고_쓰지_않는다() {
     let dir = empty_repo();
     let report = json(&lore_in(dir.path(), &["install", "--dry-run"]));
     assert_eq!(report["dry_run"], true);
-    assert_eq!(changes(&report).len(), 9);
+    assert_eq!(changes(&report).len(), 10);
     assert_eq!(
         git(
             dir.path(),
@@ -204,4 +205,62 @@ fn 예전_버전이_설치하고_고치지_않은_스킬은_새_버전으로_바
     let report = json(&lore_in(dir.path(), &["install"]));
     assert!(changes(&report).contains(&(path.to_string(), "updated".to_string())));
     assert!(read(dir.path(), path).contains("# lore 기록"));
+}
+
+const WORKFLOW: &str = ".github/workflows/lore.yml";
+
+#[test]
+fn 워크플로는_이_버전의_릴리스_바이너리로_lore_check를_돈다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    let text = read(dir.path(), WORKFLOW);
+    assert!(text.starts_with("# lore-hash: "));
+    assert!(text.contains(&format!("LORE_VERSION: \"{}\"", env!("CARGO_PKG_VERSION"))));
+    assert!(text.contains("LORE_REPO: \"Just-gomin/lore\""));
+    assert!(text.contains("fetch-depth: 0"));
+    assert!(text.contains("lore check --base"));
+    // PR 워크플로는 인덱스를 다시 쓰는 lore build를 돌리지 않는다.
+    assert!(!text.contains("lore build"));
+    // PR 설명을 run에 직접 넣지 않는다.
+    assert!(!text.contains("run: ${{ github.event.pull_request.body"));
+    assert!(text.contains("PR_BODY: ${{ github.event.pull_request.body }}"));
+}
+
+#[test]
+fn no_ci면_워크플로를_설치하지_않는다() {
+    let dir = empty_repo();
+    let report = json(&lore_in(dir.path(), &["install", "--no-ci"]));
+    assert!(changes(&report).iter().all(|(path, _)| path != WORKFLOW));
+    assert!(!dir.path().join(".github").exists());
+}
+
+#[test]
+fn 사람이_고친_워크플로는_덮어쓰지_않는다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    let edited = read(dir.path(), WORKFLOW).replace("ubuntu-latest", "ubuntu-24.04");
+    std::fs::write(dir.path().join(WORKFLOW), &edited).unwrap();
+
+    let report = json(&lore_in(dir.path(), &["install"]));
+    assert!(changes(&report).contains(&(WORKFLOW.to_string(), "kept".to_string())));
+    assert_eq!(read(dir.path(), WORKFLOW), edited);
+}
+
+#[test]
+fn 예전_버전이_설치하고_고치지_않은_워크플로는_새_버전으로_바꾼다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    let body = "name: \"lore\"\n";
+    let old = format!(
+        "# lore-hash: {}\n{body}",
+        lore::source::sha256_hex(body.as_bytes())
+    );
+    std::fs::write(dir.path().join(WORKFLOW), old).unwrap();
+
+    let report = json(&lore_in(dir.path(), &["install"]));
+    assert!(changes(&report).contains(&(WORKFLOW.to_string(), "updated".to_string())));
+    assert_eq!(
+        read(dir.path(), WORKFLOW),
+        lore::install::installed_workflow()
+    );
 }

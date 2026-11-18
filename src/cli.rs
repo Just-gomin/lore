@@ -114,6 +114,8 @@ pub enum Request {
         dry_run: bool,
         /// `--no-skills`면 거짓이다.
         skills: bool,
+        /// `--no-ci`면 거짓이다.
+        ci: bool,
     },
     Sync {
         /// 비교 기준 ref.
@@ -169,6 +171,7 @@ impl Request {
             Command::Install => Request::Install {
                 dry_run: matches.get_flag(DRY_RUN),
                 skills: !matches.get_flag(NO_SKILLS),
+                ci: !matches.get_flag(NO_CI),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -265,6 +268,7 @@ const BASE: &str = "base";
 const PR_BODY: &str = "pr-body";
 const REPORT: &str = "report";
 const NO_SKILLS: &str = "no-skills";
+const NO_CI: &str = "no-ci";
 const WITH_CONFIG: &str = "with-config";
 
 fn parse_slug(value: &str) -> Result<String, String> {
@@ -351,7 +355,8 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                 Arg::new(NO_SKILLS)
                     .long(NO_SKILLS)
                     .action(ArgAction::SetTrue),
-            ),
+            )
+            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue)),
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -534,6 +539,7 @@ mod tests {
                     Request::Install {
                         dry_run: false,
                         skills: true,
+                        ci: true,
                     },
                 ),
                 Command::Sync => (
