@@ -264,7 +264,8 @@ pub fn summary(body: &str) -> Option<String> {
     (!text.is_empty()).then_some(text)
 }
 
-fn matcher(pattern: &str) -> Result<GlobMatcher, globset::Error> {
+/// 스펙의 `paths`, `tests`와 설정의 글롭을 읽는다. `*`는 폴더 경계를 넘지 않는다.
+pub fn matcher(pattern: &str) -> Result<GlobMatcher, globset::Error> {
     let pattern = pattern.trim_start_matches("./");
     Ok(GlobBuilder::new(pattern)
         .literal_separator(true)

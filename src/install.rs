@@ -26,7 +26,7 @@ pub const TOOL_POINTER: &str = include_str!("../templates/tool-pointer.md");
 const DEFAULT_CONFIG: &str = include_str!("../templates/lore.config.yaml");
 
 /// 내장 스킬. 이름과 템플릿이다.
-pub const SKILLS: [(&str, &str); 2] = [
+pub const SKILLS: [(&str, &str); 3] = [
     (
         "lore-record",
         include_str!("../templates/skills/lore-record.md"),
@@ -34,6 +34,10 @@ pub const SKILLS: [(&str, &str); 2] = [
     (
         "lore-source",
         include_str!("../templates/skills/lore-source.md"),
+    ),
+    (
+        "lore-sync",
+        include_str!("../templates/skills/lore-sync.md"),
     ),
 ];
 /// 스킬을 두는 폴더. Claude Code의 프로젝트 스킬 위치다.
@@ -146,6 +150,16 @@ pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport,
     }
 
     Ok(plan.finish())
+}
+
+/// lore가 설치하는 파일. `lore check`의 매핑 누락 검사에서 뺀다.
+pub fn installed_files() -> Vec<String> {
+    let mut files: Vec<String> = std::iter::once(AGENTS_FILE)
+        .chain(TOOL_FILES)
+        .map(str::to_string)
+        .collect();
+    files.extend(SKILLS.iter().map(|(name, _)| skill_path(name)));
+    files
 }
 
 pub fn skill_path(name: &str) -> String {

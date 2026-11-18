@@ -89,3 +89,159 @@ pub fn worktree_fingerprint(root: &Path, exclude: &str) -> Result<String, LoreEr
     }
     Ok(sha256_hex(text.as_bytes()))
 }
+
+/// 비교 기준 이후 바뀐 파일 하나.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Change {
+    pub kind: ChangeKind,
+    /// 지금 경로. 삭제된 파일은 지워지기 전 경로다.
+    pub path: String,
+    /// 이름이 바뀐 파일의 원래 경로.
+    pub from: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeKind {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+}
+
+/// `base`와 `HEAD`의 merge-base. PR의 비교 기준이다.
+pub fn merge_base(root: &Path, base: &str) -> Result<String, LoreError> {
+    let output = git(root, &["merge-base", base, "HEAD"]).map_err(|error| match error {
+        // 공통 조상이 없으면 git이 아무 말 없이 실패한다.
+        LoreError::Git { message } if message.is_empty() => LoreError::Git {
+            message: format!("'{base}'와 HEAD의 공통 조상을 찾지 못했습니다."),
+        },
+        other => other,
+    })?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+/// `commit`에 있던 파일의 내용. 프로젝트 홈 기준 경로이고, 그 커밋에 없었으면 `None`이다.
+pub fn show(root: &Path, commit: &str, path: &str) -> Option<String> {
+    git(root, &["show", &format!("{commit}:./{path}")])
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// `merge_base` 이후 바뀐 파일. 프로젝트 홈 기준 경로다.
+///
+/// 커밋하지 않은 변경도 넣고, git이 추적하지 않는 새 파일은 넣지 않는다.
+pub fn changed_files(root: &Path, merge_base: &str) -> Result<Vec<Change>, LoreError> {
+    let output = git(
+        root,
+        &[
+            "diff",
+            "-M",
+            "--name-status",
+            "--no-color",
+            "-z",
+            "--relative",
+            merge_base,
+        ],
+    )?;
+    Ok(parse_name_status(&split_nul(&output)))
+}
+
+/// 현재 커밋에서 첫 부모를 따라간 커밋마다 바뀐 파일. 프로젝트 홈 기준 경로다.
+///
+/// 기본 브랜치에 squash merge한 커밋 하나를 PR 하나로 본다. 첫 커밋은 넣지 않는다.
+/// 이름 변경은 원래 경로와 새 경로가 모두 나온다.
+pub fn history(root: &Path) -> Result<Vec<Vec<String>>, LoreError> {
+    if head_commit(root).is_none() {
+        return Ok(Vec::new());
+    }
+    let output = git(
+        root,
+        &[
+            "-c",
+            "log.showRoot=false",
+            "log",
+            "-z",
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--no-renames",
+            "--name-only",
+            "--relative",
+            &format!("--format={COMMIT_MARK}%H"),
+        ],
+    )?;
+    let mut commits: Vec<Vec<String>> = Vec::new();
+    for part in split_nul(&output) {
+        if part.starts_with(COMMIT_MARK) {
+            commits.push(Vec::new());
+        } else if let Some(files) = commits.last_mut() {
+            files.push(part.trim_start_matches('\n').to_string());
+        }
+    }
+    Ok(commits)
+}
+
+const COMMIT_MARK: &str = "lore-commit ";
+
+/// `git diff --name-status -z`의 출력을 읽는다. 이름 변경과 복사는 경로가 두 개 온다.
+fn parse_name_status(parts: &[String]) -> Vec<Change> {
+    let mut changes = Vec::new();
+    let mut parts = parts.iter();
+    while let Some(status) = parts.next() {
+        let Some(path) = parts.next() else { break };
+        let change = match status.as_bytes().first() {
+            Some(b'R' | b'C') => {
+                let Some(to) = parts.next() else { break };
+                Change {
+                    kind: if status.starts_with('R') {
+                        ChangeKind::Renamed
+                    } else {
+                        ChangeKind::Added
+                    },
+                    path: to.clone(),
+                    from: status.starts_with('R').then(|| path.clone()),
+                }
+            }
+            Some(b'A') => Change {
+                kind: ChangeKind::Added,
+                path: path.clone(),
+                from: None,
+            },
+            Some(b'D') => Change {
+                kind: ChangeKind::Deleted,
+                path: path.clone(),
+                from: None,
+            },
+            _ => Change {
+                kind: ChangeKind::Modified,
+                path: path.clone(),
+                from: None,
+            },
+        };
+        changes.push(change);
+    }
+    changes
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn 이름_변경은_원래_경로와_새_경로를_함께_읽는다() {
+        let parts: Vec<String> = [
+            "M", "a.ts", "R087", "old.ts", "new.ts", "A", "b.ts", "D", "c.ts",
+        ]
+        .iter()
+        .map(|part| part.to_string())
+        .collect();
+        let changes = parse_name_status(&parts);
+        assert_eq!(changes.len(), 4);
+        assert_eq!(changes[0].kind, ChangeKind::Modified);
+        assert_eq!(changes[1].kind, ChangeKind::Renamed);
+        assert_eq!(changes[1].path, "new.ts");
+        assert_eq!(changes[1].from.as_deref(), Some("old.ts"));
+        assert_eq!(changes[2].kind, ChangeKind::Added);
+        assert_eq!(changes[3].kind, ChangeKind::Deleted);
+        assert_eq!(changes[3].path, "c.ts");
+    }
+}

@@ -50,6 +50,7 @@ fn 빈_레포에_설정_뼈대_안내문을_만들고_빌드가_된다() {
             ("AGENTS.md", "created"),
             (".claude/skills/lore-record/SKILL.md", "created"),
             (".claude/skills/lore-source/SKILL.md", "created"),
+            (".claude/skills/lore-sync/SKILL.md", "created"),
         ]
         .map(|(p, c)| (p.to_string(), c.to_string()))
     );
@@ -133,7 +134,7 @@ fn dry_run은_목록만_내고_쓰지_않는다() {
     let dir = empty_repo();
     let report = json(&lore_in(dir.path(), &["install", "--dry-run"]));
     assert_eq!(report["dry_run"], true);
-    assert_eq!(changes(&report).len(), 8);
+    assert_eq!(changes(&report).len(), 9);
     assert_eq!(
         git(
             dir.path(),

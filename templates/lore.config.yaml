@@ -6,3 +6,8 @@ project:
 # id는 lore add source 입력의 channel 값과 짝을 이룹니다.
 # sensitivity: normal | sensitive | excluded. 여기에 없는 채널은 sensitive로 다룹니다.
 channels: []
+
+check:
+  # 어떤 스펙에도 속하지 않아도 되는 파일의 글롭. lore check의 매핑 누락 검사에서 뺍니다.
+  # 예: ['*.md', '.github/**', 'package.json']
+  ignore: []
