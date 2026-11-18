@@ -115,6 +115,11 @@ pub enum Request {
         /// `--no-skills`면 거짓이다.
         skills: bool,
     },
+    Sync {
+        /// 비교 기준 ref.
+        base: String,
+        dry_run: bool,
+    },
     AddSource {
         /// 입력 JSON 파일. 없으면 표준 입력에서 읽는다.
         from: Option<String>,
@@ -172,6 +177,10 @@ impl Request {
                 },
                 Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
                 None => Request::Pending(Command::Add),
+            },
+            Command::Sync => Request::Sync {
+                base: matches.get_one::<String>(BASE).cloned().unwrap_or_default(),
+                dry_run: matches.get_flag(DRY_RUN),
             },
             other => Request::Pending(other),
         }
@@ -333,6 +342,9 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(WITH_CONFIG)
                     .action(ArgAction::SetTrue),
             ),
+        Command::Sync => definition
+            .arg(Arg::new(BASE).long(BASE).required(true).value_name("ref"))
+            .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue)),
         Command::Install => definition
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
             .arg(
@@ -522,6 +534,13 @@ mod tests {
                     Request::Install {
                         dry_run: false,
                         skills: true,
+                    },
+                ),
+                Command::Sync => (
+                    vec!["sync", "--base", "main", "--dry-run"],
+                    Request::Sync {
+                        base: "main".to_string(),
+                        dry_run: true,
                     },
                 ),
                 other => (vec![other.name()], Request::Pending(other)),

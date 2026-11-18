@@ -26,7 +26,7 @@ pub const TOOL_POINTER: &str = include_str!("../templates/tool-pointer.md");
 const DEFAULT_CONFIG: &str = include_str!("../templates/lore.config.yaml");
 
 /// 내장 스킬. 이름과 템플릿이다.
-pub const SKILLS: [(&str, &str); 2] = [
+pub const SKILLS: [(&str, &str); 3] = [
     (
         "lore-record",
         include_str!("../templates/skills/lore-record.md"),
@@ -34,6 +34,10 @@ pub const SKILLS: [(&str, &str); 2] = [
     (
         "lore-source",
         include_str!("../templates/skills/lore-source.md"),
+    ),
+    (
+        "lore-sync",
+        include_str!("../templates/skills/lore-sync.md"),
     ),
 ];
 /// 스킬을 두는 폴더. Claude Code의 프로젝트 스킬 위치다.

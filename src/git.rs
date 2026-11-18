@@ -108,12 +108,23 @@ pub enum ChangeKind {
     Renamed,
 }
 
-/// `base`와 `HEAD`의 merge-base 이후 바뀐 파일. 프로젝트 홈 기준 경로다.
+/// `base`와 `HEAD`의 merge-base. PR의 비교 기준이다.
+pub fn merge_base(root: &Path, base: &str) -> Result<String, LoreError> {
+    let output = git(root, &["merge-base", base, "HEAD"])?;
+    Ok(String::from_utf8_lossy(&output).trim().to_string())
+}
+
+/// `commit`에 있던 파일의 내용. 프로젝트 홈 기준 경로이고, 그 커밋에 없었으면 `None`이다.
+pub fn show(root: &Path, commit: &str, path: &str) -> Option<String> {
+    git(root, &["show", &format!("{commit}:./{path}")])
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// `merge_base` 이후 바뀐 파일. 프로젝트 홈 기준 경로다.
 ///
 /// 커밋하지 않은 변경도 넣고, git이 추적하지 않는 새 파일은 넣지 않는다.
-pub fn changed_files(root: &Path, base: &str) -> Result<Vec<Change>, LoreError> {
-    let merge_base = git(root, &["merge-base", base, "HEAD"])?;
-    let merge_base = String::from_utf8_lossy(&merge_base).trim().to_string();
+pub fn changed_files(root: &Path, merge_base: &str) -> Result<Vec<Change>, LoreError> {
     let output = git(
         root,
         &[
@@ -123,7 +134,7 @@ pub fn changed_files(root: &Path, base: &str) -> Result<Vec<Change>, LoreError> 
             "--no-color",
             "-z",
             "--relative",
-            &merge_base,
+            merge_base,
         ],
     )?;
     Ok(parse_name_status(&split_nul(&output)))

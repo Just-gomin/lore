@@ -196,7 +196,7 @@ fn check_of(code: &str) -> &'static str {
 pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreError> {
     let changes = options
         .base
-        .map(|base| git::changed_files(&config.root, base))
+        .map(|base| git::changed_files(&config.root, &git::merge_base(&config.root, base)?))
         .transpose()?;
     let (corpus, mut problems) = source::read_lenient(config);
     let files = git::tracked_files(&config.root)?;
@@ -306,10 +306,40 @@ pub fn parse_no_impact(text: &str) -> BTreeMap<String, String> {
     found
 }
 
+/// 바뀐 경로. 이름이 바뀐 파일은 원래 경로와 새 경로, 삭제된 파일은 지워지기 전 경로다.
+fn touched_paths(changes: &[Change]) -> BTreeSet<&str> {
+    changes
+        .iter()
+        .flat_map(|change| std::iter::once(change.path.as_str()).chain(change.from.as_deref()))
+        .collect()
+}
+
+/// 바뀐 파일이 구현함이나 검증함으로 닿는 스펙과 그 파일. 스펙 ID 순이다.
+///
+/// 글롭은 지금 스펙의 것을 쓴다. 기준 커밋과 글롭이 다르면 그 스펙 파일이 바뀐 것이다.
+pub(crate) fn reached_specs<'a>(
+    corpus: &'a source::Corpus,
+    changes: &[Change],
+) -> Vec<(&'a source::Document, Vec<String>)> {
+    let touched = touched_paths(changes);
+    let mut reached: Vec<_> = SpecGlobs::all(corpus)
+        .into_iter()
+        .filter_map(|spec| {
+            let files: Vec<String> = touched
+                .iter()
+                .filter(|path| spec.matches(path))
+                .map(|path| path.to_string())
+                .collect();
+            (!files.is_empty()).then_some((spec.doc, files))
+        })
+        .collect();
+    reached.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    reached
+}
+
 /// 바뀐 파일이 구현함이나 검증함으로 닿는 스펙이 같은 비교 범위에서 바뀌었는지.
 ///
-/// 이름이 바뀐 파일은 원래 경로와 새 경로를 모두 보고, 삭제된 파일은 지워지기 전 경로를 본다.
-/// 글롭은 지금 스펙의 것을 쓴다. 기준 커밋과 글롭이 다르면 그 스펙 파일이 바뀐 것이라 결과가 같다.
+/// 스펙 파일이 비교 범위에서 바뀌었으면 본문인지 머리말인지 가리지 않고 함께 바뀐 것으로 본다.
 fn spec_update_check(
     corpus: &source::Corpus,
     changes: Option<&[Change]>,
@@ -320,22 +350,11 @@ fn spec_update_check(
     let Some(changes) = changes else {
         return Check::skipped(ID, LABEL, false, NO_BASE);
     };
-    let touched: BTreeSet<&str> = changes
-        .iter()
-        .flat_map(|change| std::iter::once(change.path.as_str()).chain(change.from.as_deref()))
-        .collect();
+    let touched = touched_paths(changes);
     let mut findings = Vec::new();
-    for spec in SpecGlobs::all(corpus) {
-        let files: Vec<String> = touched
-            .iter()
-            .filter(|path| spec.matches(path))
-            .map(|path| path.to_string())
-            .collect();
-        if files.is_empty() {
-            continue;
-        }
-        let reason = no_impact.get(&spec.doc.id).cloned();
-        let outcome = if touched.contains(spec.doc.path.as_str()) {
+    for (doc, files) in reached_specs(corpus, changes) {
+        let reason = no_impact.get(&doc.id).cloned();
+        let outcome = if touched.contains(doc.path.as_str()) {
             Outcome::Updated
         } else if reason.is_some() {
             Outcome::NoImpact
@@ -343,7 +362,7 @@ fn spec_update_check(
             Outcome::Warned
         };
         findings.push(Finding {
-            spec: Some(spec.doc.id.clone()),
+            spec: Some(doc.id.clone()),
             files,
             reason: reason.filter(|_| outcome == Outcome::NoImpact),
             outcome,
