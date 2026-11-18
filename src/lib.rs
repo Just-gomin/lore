@@ -85,14 +85,28 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
         Request::Add(record) => config::discover(cwd)
             .and_then(|config| add::add(&config, &record))
             .map(|report| output::success(&report, for_human, add::render_report)),
-        Request::Check { origins } => origins
+        Request::Check {
+            origins,
+            base,
+            pr_body,
+        } => origins
             .map(|path| {
                 read_input(Some(&path), cwd)
                     .and_then(|(name, text)| check::parse_origins(&name, &text))
             })
             .transpose()
             .and_then(|origins| {
-                config::discover(cwd).and_then(|config| check::check(&config, origins.as_ref()))
+                let pr_body = pr_body
+                    .map(|path| read_input(Some(&path), cwd).map(|(_, text)| text))
+                    .transpose()?;
+                config::discover(cwd).and_then(|config| {
+                    check::check(
+                        &config,
+                        origins.as_ref(),
+                        base.as_deref(),
+                        pr_body.as_deref(),
+                    )
+                })
             })
             .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
         Request::Uninstall {

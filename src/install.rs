@@ -148,6 +148,16 @@ pub fn install(cwd: &Path, dry_run: bool, skills: bool) -> Result<InstallReport,
     Ok(plan.finish())
 }
 
+/// lore가 설치하는 파일. `lore check`의 매핑 누락 검사에서 뺀다.
+pub fn installed_files() -> Vec<String> {
+    let mut files: Vec<String> = std::iter::once(AGENTS_FILE)
+        .chain(TOOL_FILES)
+        .map(str::to_string)
+        .collect();
+    files.extend(SKILLS.iter().map(|(name, _)| skill_path(name)));
+    files
+}
+
 pub fn skill_path(name: &str) -> String {
     format!("{SKILL_DIR}/{name}/SKILL.md")
 }

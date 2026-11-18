@@ -1,4 +1,4 @@
-//! `lore check`의 기계적 검사를 고정 예제로 확인한다.
+//! `lore check`의 기계적 검사와 판단이 드는 검사를 고정 예제로 확인한다.
 
 mod common;
 
@@ -208,7 +208,7 @@ fn 사람용_출력은_실패를_먼저_보여_주고_표준_출력으로_낸다
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(
         stdout(&output),
-        "lore check: 실패 1, 건너뜀 1, 통과 4
+        "lore check: 실패 1, 건너뜀 3, 통과 4
 
 실패  인덱스 일치
   docs/INDEX.md 인덱스 파일이 없습니다.
@@ -216,6 +216,12 @@ fn 사람용_출력은_실패를_먼저_보여_주고_표준_출력으로_낸다
 
 건너뜀  소스 노트 신선도
   --origins로 원본의 최신 판 목록을 주지 않았습니다.
+
+건너뜀  스펙 동반 갱신
+  --base로 비교 기준을 주지 않았습니다.
+
+건너뜀  매핑 누락
+  --base로 비교 기준을 주지 않았습니다.
 
 통과  경로 유효성
 
@@ -322,4 +328,324 @@ fn 원본_목록의_형식이_틀리면_invalid_input이다() {
 
     let (_, report) = check_with_origins(dir.path(), &[THREAD, (THREAD.0, "다른 판")]);
     assert_eq!(report["error"]["problems"][0]["code"], "duplicate_origin");
+}
+
+/// 고정 예제에서 `feature` 브랜치를 만들어, `main`을 비교 기준으로 쓸 수 있게 한다.
+fn feature_repo() -> TempDir {
+    let dir = clean_repo();
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    dir
+}
+
+fn commit_all(dir: &Path, message: &str) {
+    git(dir, &["add", "-A"]);
+    git(dir, &["commit", "-q", "-m", message]);
+}
+
+/// `--base main`으로 검사한다. PR 설명이 있으면 파일로 써서 `--pr-body`로 넘긴다.
+fn check_against_main(dir: &Path, pr_body: Option<&str>) -> (Option<i32>, Value) {
+    let mut args = vec!["check", "--base", "main"];
+    if let Some(body) = pr_body {
+        // 워크플로처럼 레포 밖에 두어 바뀐 파일에 끼지 않게 한다.
+        let file = dir.join(".git/lore-pr-body.md");
+        std::fs::write(file, body).unwrap();
+        args.extend(["--pr-body", ".git/lore-pr-body.md"]);
+    }
+    let output = lore_in(dir, &args);
+    (output.status.code(), json(&output))
+}
+
+fn findings(report: &Value, id: &str) -> Vec<Value> {
+    check_of(report, id)["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+}
+
+#[test]
+fn 비교_기준이_없으면_판단이_드는_검사는_건너뛰고_막지_않는다() {
+    let dir = clean_repo();
+    let report = json(&lore_in(dir.path(), &["check"]));
+    for id in ["spec_update", "unmapped"] {
+        assert_eq!(status_of(&report, id), "skip", "{id}");
+        assert_eq!(check_of(&report, id)["blocking"], false);
+        assert!(check_of(&report, id)["reason"].is_string());
+    }
+}
+
+#[test]
+fn 코드만_바꾸면_스펙_동반_갱신_경고이고_병합을_막지_않는다() {
+    let dir = feature_repo();
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 재시도 간격 조정\nexport",
+    );
+    commit_all(dir.path(), "재시도 정책 수정");
+    let (code, report) = check_against_main(dir.path(), None);
+    assert_eq!(code, Some(0));
+    assert_eq!(report["ok"], true);
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+    assert!(check_of(&report, "spec_update")["fix"].is_string());
+    assert_eq!(
+        findings(&report, "spec_update"),
+        [serde_json::json!({
+            "spec": "payment-retry",
+            "files": ["services/payment/retry/policy.ts"],
+            "outcome": "warned",
+        })]
+    );
+    // 기존 파일을 고친 것이라 매핑 누락은 아니다.
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+}
+
+#[test]
+fn 스펙도_함께_바꾸면_스펙_동반_갱신은_통과다() {
+    let dir = feature_repo();
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 재시도 간격 조정\nexport",
+    );
+    edit(
+        dir.path(),
+        "docs/specs/payment-retry.md",
+        "최대 3회까지",
+        "간격을 늘려 가며 최대 3회까지",
+    );
+    // 커밋하지 않은 변경도 비교 범위에 든다.
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+    let found = findings(&report, "spec_update");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["outcome"], "updated");
+}
+
+#[test]
+fn no_impact_줄을_준_스펙은_경고_없이_넘기고_사유를_남긴다() {
+    let dir = feature_repo();
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 주석만 고침\nexport",
+    );
+    edit(
+        dir.path(),
+        "services/notification/retry-alert.ts",
+        "export",
+        "// 주석만 고침\nexport",
+    );
+    commit_all(dir.path(), "주석 정리");
+    let body = "주석을 정리합니다.\r\n\r\nlore: no-impact payment-retry 주석만 바꿈\r\n";
+    let (code, report) = check_against_main(dir.path(), Some(body));
+    assert_eq!(code, Some(0));
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+    assert_eq!(
+        findings(&report, "spec_update"),
+        [
+            serde_json::json!({
+                "spec": "payment-notification",
+                "files": ["services/notification/retry-alert.ts"],
+                "outcome": "warned",
+            }),
+            serde_json::json!({
+                "spec": "payment-retry",
+                "files": ["services/payment/retry/policy.ts"],
+                "outcome": "no_impact",
+                "reason": "주석만 바꿈",
+            }),
+        ]
+    );
+
+    let body = "lore: no-impact payment-retry 주석만 바꿈\nlore: no-impact payment-notification 주석만 바꿈\n";
+    let (_, report) = check_against_main(dir.path(), Some(body));
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+}
+
+#[test]
+fn 비교_기준은_merge_base라서_기준_브랜치의_이후_커밋은_보지_않는다() {
+    let dir = clean_repo();
+    git(dir.path(), &["checkout", "-q", "-b", "feature"]);
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 재시도 간격 조정\nexport",
+    );
+    commit_all(dir.path(), "재시도 정책 수정");
+    git(dir.path(), &["checkout", "-q", "main"]);
+    edit(
+        dir.path(),
+        "services/payment/core/charge.ts",
+        "export",
+        "// 다른 PR\nexport",
+    );
+    commit_all(dir.path(), "다른 PR");
+    git(dir.path(), &["checkout", "-q", "feature"]);
+
+    let (_, report) = check_against_main(dir.path(), None);
+    let specs: Vec<Value> = findings(&report, "spec_update")
+        .iter()
+        .map(|finding| finding["spec"].clone())
+        .collect();
+    assert_eq!(specs, ["payment-retry"]);
+}
+
+#[test]
+fn 지운_파일은_지우기_전_경로로_스펙을_찾는다() {
+    let dir = feature_repo();
+    git(
+        dir.path(),
+        &["rm", "-q", "services/payment/retry/policy.ts"],
+    );
+    commit_all(dir.path(), "정책 파일 삭제");
+    let (_, report) = check_against_main(dir.path(), None);
+    let found = findings(&report, "spec_update");
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0]["spec"], "payment-retry");
+    assert_eq!(found[0]["files"][0], "services/payment/retry/policy.ts");
+}
+
+#[test]
+fn 스펙에_맞지_않는_새_파일은_매핑_누락_경고다() {
+    let dir = feature_repo();
+    let write = |path: &str| {
+        let file = dir.path().join(path);
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        std::fs::write(file, "export {};\n").unwrap();
+    };
+    write("services/billing/invoice.ts");
+    write("services/payment/retry/backoff.ts");
+    write("docs/plans/next.md");
+    write(".claude/skills/lore-record/SKILL.md");
+    commit_all(dir.path(), "새 파일");
+    // git이 추적하지 않는 파일은 보지 않는다.
+    write("services/billing/draft.ts");
+
+    let (code, report) = check_against_main(dir.path(), None);
+    assert_eq!(code, Some(0));
+    assert_eq!(status_of(&report, "unmapped"), "warn");
+    assert!(check_of(&report, "unmapped")["fix"].is_string());
+    assert_eq!(
+        findings(&report, "unmapped"),
+        [serde_json::json!({
+            "files": ["services/billing/invoice.ts"],
+            "outcome": "warned",
+        })]
+    );
+}
+
+#[test]
+fn 이름을_바꾼_파일은_새_경로로_매핑을_본다() {
+    let dir = feature_repo();
+    std::fs::create_dir_all(dir.path().join("services/payment/core/fees")).unwrap();
+    git(
+        dir.path(),
+        &[
+            "mv",
+            "services/payment/retry/policy.ts",
+            "services/payment/core/fees/policy.ts",
+        ],
+    );
+    commit_all(dir.path(), "정책을 결제 처리로 옮김");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+    // 옮겨 간 스펙과 원래 스펙에 모두 닿는다.
+    let specs: Vec<Value> = findings(&report, "spec_update")
+        .iter()
+        .map(|finding| finding["spec"].clone())
+        .collect();
+    assert_eq!(specs, ["payment-core", "payment-retry"]);
+}
+
+#[test]
+fn 설정의_무시_목록에_맞는_새_파일은_매핑_누락에서_뺀다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let text = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{text}\ncheck:\n  ignore:\n    - 'scripts/**'\n"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+    std::fs::write(dir.path().join("scripts/seed.ts"), "export {};\n").unwrap();
+    commit_all(dir.path(), "시드 스크립트");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+    assert!(findings(&report, "unmapped").is_empty());
+}
+
+#[test]
+fn 판단이_드는_검사의_사람용_출력은_스펙과_파일을_보여_준다() {
+    let dir = feature_repo();
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 재시도 간격 조정\nexport",
+    );
+    edit(
+        dir.path(),
+        "services/notification/retry-alert.ts",
+        "export",
+        "// 주석만 고침\nexport",
+    );
+    std::fs::create_dir_all(dir.path().join("services/billing")).unwrap();
+    std::fs::write(
+        dir.path().join("services/billing/invoice.ts"),
+        "export {};\n",
+    )
+    .unwrap();
+    commit_all(dir.path(), "여러 변경");
+    std::fs::write(
+        dir.path().join(".git/body.md"),
+        "lore: no-impact payment-notification 주석만 바꿈\n",
+    )
+    .unwrap();
+    let output = lore_in(
+        dir.path(),
+        &[
+            "check",
+            "--base",
+            "main",
+            "--pr-body",
+            ".git/body.md",
+            "--for-human",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    assert!(
+        text.starts_with("lore check: 경고 2, 건너뜀 1, 통과 5\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "경고  스펙 동반 갱신
+  payment-notification 영향 없음으로 넘김: 주석만 바꿈
+  payment-retry 스펙이 바뀌지 않았습니다. 바뀐 파일: services/payment/retry/policy.ts
+  고치려면: "
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains(
+            "경고  매핑 누락
+  services/billing/invoice.ts 어떤 스펙의 paths, tests에도 맞지 않습니다.
+  고치려면: "
+        ),
+        "{text}"
+    );
+}
+
+#[test]
+fn 비교_기준을_찾지_못하면_git_오류다() {
+    let dir = clean_repo();
+    let output = lore_in(dir.path(), &["check", "--base", "no-such-branch"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(json(&output)["error"]["code"], "git");
 }

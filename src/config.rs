@@ -8,7 +8,7 @@ use crate::error::LoreError;
 
 pub const CONFIG_FILE: &str = "lore.config.yaml";
 
-/// 2단계에서 쓰는 설정 항목. 나머지 항목은 읽고 버린다.
+/// lore가 쓰는 설정 항목. 나머지 항목은 읽고 버린다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
     /// 프로젝트 홈. 설정 파일이 있는 폴더다.
@@ -17,6 +17,8 @@ pub struct Config {
     pub docs: String,
     /// 자료를 가져오는 채널. `lore add source` 입력의 `channel`과 짝을 이룬다.
     pub channels: Vec<Channel>,
+    /// 어떤 스펙에도 속하지 않아도 되는 파일의 글롭. 매핑 누락 검사에서 뺀다.
+    pub ignore: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -70,6 +72,14 @@ struct RawConfig {
     project: RawProject,
     #[serde(default)]
     channels: Vec<RawChannel>,
+    #[serde(default)]
+    check: RawCheck,
+}
+
+#[derive(Deserialize, Default)]
+struct RawCheck {
+    #[serde(default)]
+    ignore: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -150,10 +160,19 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         });
     }
 
+    for pattern in &raw.check.ignore {
+        if let Err(error) = crate::graph::matcher(pattern) {
+            return Err(invalid(format!(
+                "check.ignore의 '{pattern}'는 글롭으로 읽을 수 없습니다: {error}"
+            )));
+        }
+    }
+
     Ok(Config {
         root: root.to_path_buf(),
         docs,
         channels,
+        ignore: raw.check.ignore,
     })
 }
 
@@ -184,6 +203,17 @@ mod tests {
                 Path::new("/repo"),
                 "version: 1\nchannels:\n  - id: a\n    sensitivity: secret\n"
             ),
+            Err(LoreError::InvalidConfig { .. })
+        ));
+    }
+
+    #[test]
+    fn 매핑_누락에서_뺄_글롭을_읽고_틀린_글롭은_오류다() {
+        let text = "version: 1\ncheck:\n  ignore:\n    - '*.md'\n";
+        assert_eq!(config(text).unwrap().ignore, ["*.md"]);
+        assert!(config("version: 1\n").unwrap().ignore.is_empty());
+        assert!(matches!(
+            config("version: 1\ncheck:\n  ignore: ['a/[b']\n"),
             Err(LoreError::InvalidConfig { .. })
         ));
     }
