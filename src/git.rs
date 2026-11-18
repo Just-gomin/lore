@@ -129,6 +129,42 @@ pub fn changed_files(root: &Path, base: &str) -> Result<Vec<Change>, LoreError> 
     Ok(parse_name_status(&split_nul(&output)))
 }
 
+/// 현재 커밋에서 첫 부모를 따라간 커밋마다 바뀐 파일. 프로젝트 홈 기준 경로다.
+///
+/// 기본 브랜치에 squash merge한 커밋 하나를 PR 하나로 본다. 첫 커밋은 넣지 않는다.
+/// 이름 변경은 원래 경로와 새 경로가 모두 나온다.
+pub fn history(root: &Path) -> Result<Vec<Vec<String>>, LoreError> {
+    if head_commit(root).is_none() {
+        return Ok(Vec::new());
+    }
+    let output = git(
+        root,
+        &[
+            "-c",
+            "log.showRoot=false",
+            "log",
+            "-z",
+            "--first-parent",
+            "--diff-merges=first-parent",
+            "--no-renames",
+            "--name-only",
+            "--relative",
+            &format!("--format={COMMIT_MARK}%H"),
+        ],
+    )?;
+    let mut commits: Vec<Vec<String>> = Vec::new();
+    for part in split_nul(&output) {
+        if part.starts_with(COMMIT_MARK) {
+            commits.push(Vec::new());
+        } else if let Some(files) = commits.last_mut() {
+            files.push(part.trim_start_matches('\n').to_string());
+        }
+    }
+    Ok(commits)
+}
+
+const COMMIT_MARK: &str = "lore-commit ";
+
 /// `git diff --name-status -z`의 출력을 읽는다. 이름 변경과 복사는 경로가 두 개 온다.
 fn parse_name_status(parts: &[String]) -> Vec<Change> {
     let mut changes = Vec::new();

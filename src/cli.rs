@@ -92,6 +92,8 @@ pub enum Request {
         base: Option<String>,
         /// PR 설명을 담은 파일.
         pr_body: Option<String>,
+        /// 병합을 막지 않는 보고를 낼지.
+        report: bool,
     },
     Why {
         target: String,
@@ -130,6 +132,7 @@ impl Request {
                 origins: matches.get_one::<String>(ORIGINS).cloned(),
                 base: matches.get_one::<String>(BASE).cloned(),
                 pr_body: matches.get_one::<String>(PR_BODY).cloned(),
+                report: matches.get_flag(REPORT),
             },
             Command::Impact => Request::Impact {
                 target: matches
@@ -251,6 +254,7 @@ const DRY_RUN: &str = "dry-run";
 const ORIGINS: &str = "origins";
 const BASE: &str = "base";
 const PR_BODY: &str = "pr-body";
+const REPORT: &str = "report";
 const NO_SKILLS: &str = "no-skills";
 const WITH_CONFIG: &str = "with-config";
 
@@ -320,7 +324,8 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
         Command::Check => definition
             .arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일"))
             .arg(Arg::new(BASE).long(BASE).value_name("ref"))
-            .arg(Arg::new(PR_BODY).long(PR_BODY).value_name("파일")),
+            .arg(Arg::new(PR_BODY).long(PR_BODY).value_name("파일"))
+            .arg(Arg::new(REPORT).long(REPORT).action(ArgAction::SetTrue)),
         Command::Uninstall => definition
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
             .arg(
@@ -472,6 +477,7 @@ mod tests {
                         origins: None,
                         base: None,
                         pr_body: None,
+                        report: false,
                     },
                 ),
                 Command::Why => (

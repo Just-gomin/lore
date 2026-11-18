@@ -12,7 +12,7 @@ use crate::config::{CONFIG_FILE, Config};
 use crate::error::{LoreError, Problem};
 use crate::git::{Change, ChangeKind};
 use crate::install::{self, AGENTS_BODY, AGENTS_FILE, TOOL_FILES, TOOL_POINTER};
-use crate::{git, graph, index, source};
+use crate::{git, graph, index, report, source};
 
 /// 검사 하나의 결과.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -156,6 +156,22 @@ impl Check {
 #[derive(Debug, Serialize)]
 pub struct CheckReport {
     pub checks: Vec<Check>,
+    /// 병합을 막지 않는 보고. `--report`일 때만 있다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<report::Report>,
+}
+
+/// `lore check`의 옵션.
+#[derive(Debug, Default)]
+pub struct Options<'a> {
+    /// 원본의 최신 판 목록. 없으면 신선도 검사를 건너뛴다.
+    pub origins: Option<&'a Origins>,
+    /// 비교 기준이 될 ref. 없으면 바뀐 파일이 필요한 검사를 건너뛴다.
+    pub base: Option<&'a str>,
+    /// PR 설명. `lore: no-impact` 줄을 읽는다.
+    pub pr_body: Option<&'a str>,
+    /// 병합을 막지 않는 보고를 낼지.
+    pub report: bool,
 }
 
 impl CheckReport {
@@ -177,15 +193,9 @@ fn check_of(code: &str) -> &'static str {
     }
 }
 
-/// `base`는 비교 기준이 될 ref다. 없으면 바뀐 파일이 필요한 검사를 건너뛴다.
-/// `pr_body`는 PR 설명이고 `lore: no-impact` 줄을 읽는다.
-pub fn check(
-    config: &Config,
-    origins: Option<&Origins>,
-    base: Option<&str>,
-    pr_body: Option<&str>,
-) -> Result<CheckReport, LoreError> {
-    let changes = base
+pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreError> {
+    let changes = options
+        .base
         .map(|base| git::changed_files(&config.root, base))
         .transpose()?;
     let (corpus, mut problems) = source::read_lenient(config);
@@ -223,29 +233,33 @@ pub fn check(
             of("frontmatter"),
             "문제에 적힌 머리말 항목을 고치세요.",
         ),
-        freshness_check(&corpus, origins),
+        freshness_check(&corpus, options.origins),
         index_check(config, &corpus, sources_ok)?,
         guide_check(config)?,
         spec_update_check(
             &corpus,
             changes.as_deref(),
-            &pr_body.map(parse_no_impact).unwrap_or_default(),
+            &options.pr_body.map(parse_no_impact).unwrap_or_default(),
         ),
         unmapped_check(config, &corpus, changes.as_deref()),
     ];
-    Ok(CheckReport { checks })
+    let report = options
+        .report
+        .then(|| report::report(config, &corpus))
+        .transpose()?;
+    Ok(CheckReport { checks, report })
 }
 
 const NO_BASE: &str = "--base로 비교 기준을 주지 않았습니다.";
 
 /// 스펙과 그 스펙의 `paths`, `tests` 글롭. 읽을 수 없는 글롭은 경로 유효성이 알리므로 뺀다.
-struct SpecGlobs<'a> {
-    doc: &'a source::Document,
+pub(crate) struct SpecGlobs<'a> {
+    pub doc: &'a source::Document,
     globs: Vec<GlobMatcher>,
 }
 
 impl SpecGlobs<'_> {
-    fn all(corpus: &source::Corpus) -> Vec<SpecGlobs<'_>> {
+    pub fn all(corpus: &source::Corpus) -> Vec<SpecGlobs<'_>> {
         corpus
             .of_kind(source::Kind::Spec)
             .filter_map(|doc| match &doc.record {
@@ -258,7 +272,7 @@ impl SpecGlobs<'_> {
             .collect()
     }
 
-    fn matches(&self, path: &str) -> bool {
+    pub fn matches(&self, path: &str) -> bool {
         self.globs.iter().any(|glob| glob.is_match(path))
     }
 }
@@ -581,6 +595,9 @@ pub fn render(report: &CheckReport) -> String {
                 text.push_str(&format!("\n  목록에 없어 확인하지 못한 원본 {count}건"));
             }
         }
+    }
+    if let Some(report) = &report.report {
+        text.push_str(&format!("\n\n{}", report::render(report)));
     }
     text
 }

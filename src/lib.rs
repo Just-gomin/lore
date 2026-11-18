@@ -18,6 +18,7 @@ pub mod index;
 pub mod install;
 pub mod output;
 pub mod query;
+pub mod report;
 pub mod source;
 pub mod why;
 
@@ -89,6 +90,7 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             origins,
             base,
             pr_body,
+            report,
         } => origins
             .map(|path| {
                 read_input(Some(&path), cwd)
@@ -99,14 +101,13 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
                 let pr_body = pr_body
                     .map(|path| read_input(Some(&path), cwd).map(|(_, text)| text))
                     .transpose()?;
-                config::discover(cwd).and_then(|config| {
-                    check::check(
-                        &config,
-                        origins.as_ref(),
-                        base.as_deref(),
-                        pr_body.as_deref(),
-                    )
-                })
+                let options = check::Options {
+                    origins: origins.as_ref(),
+                    base: base.as_deref(),
+                    pr_body: pr_body.as_deref(),
+                    report,
+                };
+                config::discover(cwd).and_then(|config| check::check(&config, &options))
             })
             .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
         Request::Uninstall {
