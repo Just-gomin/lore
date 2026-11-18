@@ -61,6 +61,7 @@ fn 빈_레포에서_걷어내면_문서_뼈대와_설정만_남는다() {
         change_of(&report, ".claude/skills/lore-record/SKILL.md"),
         "removed"
     );
+    assert_eq!(change_of(&report, ".github/workflows/lore.yml"), "removed");
     assert_eq!(
         files(dir.path()),
         [
@@ -168,4 +169,30 @@ fn dry_run은_목록만_내고_지우지_않는다() {
     assert_eq!(report["dry_run"], true);
     assert_eq!(change_of(&report, "AGENTS.md"), "removed");
     assert_eq!(files(dir.path()), before);
+}
+
+#[test]
+fn 사람이_고친_워크플로는_지우지_않는다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    let path = dir.path().join(".github/workflows/lore.yml");
+    let edited = std::fs::read_to_string(&path)
+        .unwrap()
+        .replace("ubuntu-latest", "ubuntu-24.04");
+    std::fs::write(&path, &edited).unwrap();
+    std::fs::write(dir.path().join(".github/workflows/ci.yml"), "name: ci\n").unwrap();
+
+    let report = json(&lore_in(dir.path(), &["uninstall"]));
+    assert_eq!(change_of(&report, ".github/workflows/lore.yml"), "kept");
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), edited);
+}
+
+#[test]
+fn 다른_워크플로가_있으면_github_폴더는_남긴다() {
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install"]).status.success());
+    std::fs::write(dir.path().join(".github/workflows/ci.yml"), "name: ci\n").unwrap();
+    let report = json(&lore_in(dir.path(), &["uninstall"]));
+    assert_eq!(change_of(&report, ".github/workflows/lore.yml"), "removed");
+    assert!(dir.path().join(".github/workflows/ci.yml").exists());
 }

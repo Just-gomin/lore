@@ -119,7 +119,11 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             with_config,
         } => install::uninstall(cwd, dry_run, with_config)
             .map(|report| output::success(&report, for_human, install::render)),
-        Request::Install { dry_run, skills } => install::install(cwd, dry_run, skills)
+        Request::Install {
+            dry_run,
+            skills,
+            ci,
+        } => install::install(cwd, dry_run, install::Parts { skills, ci })
             .map(|report| output::success(&report, for_human, install::render)),
         Request::AddSource { from, date } => read_input(from.as_deref(), cwd)
             .and_then(|(name, text)| add_source::parse_input(&name, &text))

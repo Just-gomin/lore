@@ -35,14 +35,15 @@
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
 | `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
-| `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬 |
+| `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬, 워크플로 |
 | `src/check.rs`       | `lore check`: 기계적 검사와 판단이 드는 검사         |
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
 | `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `src/sync.rs`        | `lore sync`: 이름 변경에 맞춰 스펙의 경로 고치기     |
-| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬      |
+| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬, 워크플로 |
+| `.github/workflows/` | 이 레포의 CI(`ci.yaml`)와 태그를 올리면 바이너리를 올리는 릴리스(`release.yaml`) |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
@@ -64,3 +65,4 @@
 - 바꾸기 전후로 `cargo fmt --all`, `cargo clippy --all-targets -- -D warnings`, `cargo test`를 돌립니다. CI가 같은 세 가지를 검사합니다.
 - 출력 형식을 바꾸면 `tests/cli.rs`의 기대값도 같은 PR에서 바꿉니다.
 - 테스트 이름은 무엇을 보장하는지 한국어 문장으로 씁니다.
+- 릴리스는 `Cargo.toml`의 버전을 올린 PR을 병합한 뒤 `v<버전>` 태그를 올려 만듭니다. `lore install`이 설치한 워크플로는 자기 버전의 릴리스 바이너리를 받으므로, 릴리스가 없는 버전으로 설치한 워크플로는 실패합니다. 릴리스 뒤 `templates/`를 바꿨으면 다음 릴리스에서 버전을 올립니다. 같은 버전에 다른 안내문이 실리면, 설치한 레포에서 CI의 릴리스 바이너리가 안내문 일치를 실패시킵니다. 다른 레포에 설치할 때는 릴리스한 바이너리를 씁니다.

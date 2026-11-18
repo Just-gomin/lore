@@ -27,3 +27,13 @@ jobs:
 
       - name: "Test"
         run: cargo test --locked
+
+      # lore install이 설치하는 워크플로와 이 레포의 워크플로를 actionlint로 검사합니다.
+      - name: "Workflow Lint"
+        run: |
+          cargo build --locked
+          target="$(mktemp -d)"
+          git -C "${target}" init -q
+          (cd "${target}" && "${GITHUB_WORKSPACE}/target/debug/lore" install)
+          curl -sSfL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz | tar -xz actionlint
+          ./actionlint -color "${target}/.github/workflows/lore.yml" .github/workflows/*.yaml
