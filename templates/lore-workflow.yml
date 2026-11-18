@@ -10,23 +10,26 @@ permissions:
   pull-requests: write
 
 concurrency:
-  group: "lore-${{ github.event.pull_request.number }}"
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number }}"
   cancel-in-progress: true
 
 jobs:
   check:
+    # 닫힌 PR의 설명을 고쳐도 돌지 않습니다.
+    if: github.event.pull_request.state == 'open'
     runs-on: ubuntu-latest
     env:
       LORE_VERSION: "{{LORE_VERSION}}"
       LORE_REPO: "{{LORE_REPO}}"
     steps:
-      # merge-base와 이력 보고에 전체 이력이 필요합니다.
+      # 비교 기준(merge-base)을 찾으려면 전체 이력이 필요합니다.
       - name: "Repository Checkout"
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       # lore 레포가 비공개면 읽을 수 있는 토큰을 LORE_TOKEN 시크릿에 넣습니다.
+      # 포크와 Dependabot의 PR에는 시크릿이 넘어가지 않아, 비공개 레포에서는 이 단계가 실패합니다.
       - name: "lore 내려받기"
         env:
           GH_TOKEN: ${{ secrets.LORE_TOKEN || github.token }}
@@ -57,7 +60,11 @@ jobs:
           script: |
             const fs = require("fs");
             const dir = process.env.RUNNER_TEMP;
-            const text = fs.readFileSync(`${dir}/check.txt`, "utf8").trimEnd();
+            // 코멘트 본문은 65536자까지라 출력과 기록의 길이를 묶어 둡니다.
+            let text = fs.readFileSync(`${dir}/check.txt`, "utf8").trimEnd();
+            if (text.length > 30000) {
+              text = `${text.slice(0, 30000)}\n... (잘림)`;
+            }
             let result = {};
             try {
               result = JSON.parse(fs.readFileSync(`${dir}/check.json`, "utf8"));
@@ -82,8 +89,14 @@ jobs:
               owner,
               repo,
               issue_number,
+              per_page: 100,
             });
-            const old = comments.find((comment) => (comment.body || "").includes(`<!-- ${mark}\n`));
+            // 이 워크플로가 쓴 코멘트만 봅니다. 다른 사람이 표식을 흉내 낸 코멘트는 건드리지 않습니다.
+            const old = comments.find(
+              (comment) =>
+                comment.user?.login === "github-actions[bot]" &&
+                (comment.body || "").includes(`<!-- ${mark}\n`),
+            );
             let runs = [];
             const recorded = old && old.body.match(new RegExp(`<!-- ${mark}\\n([^\\n]*)\\n-->`));
             if (recorded) {
@@ -96,8 +109,13 @@ jobs:
             runs = runs.filter((previous) => previous.sha !== run.sha);
             runs.push(run);
             // HTML 주석 안에 "--"가 들어가지 않게 합니다.
-            const record = JSON.stringify(runs).replace(/--/g, "-\\u002d");
-            const body = `### lore check\n\n\`\`\`text\n${text}\n\`\`\`\n\n<!-- ${mark}\n${record}\n-->\n`;
+            const encode = (list) => JSON.stringify(list).replace(/--/g, "-\\u002d");
+            // 기록이 길면 오래된 실행부터 뺍니다.
+            while (runs.length > 1 && encode(runs).length > 30000) {
+              runs.shift();
+            }
+            const record = encode(runs);
+            const body = `### lore check\n\n\`\`\`\`text\n${text}\n\`\`\`\`\n\n<!-- ${mark}\n${record}\n-->\n`;
             if (old) {
               await github.rest.issues.updateComment({ owner, repo, comment_id: old.id, body });
             } else {

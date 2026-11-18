@@ -29,7 +29,8 @@ jobs:
       - name: "릴리스 만들기"
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
+        # 바이너리를 모두 올린 뒤 게시하도록 초안으로 만듭니다.
+        run: gh release create "${GITHUB_REF_NAME}" --draft --verify-tag --title "${GITHUB_REF_NAME}" --generate-notes
 
   build:
     needs: release
@@ -60,3 +61,16 @@ jobs:
         run: |
           tar -czf "lore-${TARGET}.tar.gz" -C "target/${TARGET}/release" lore
           gh release upload "${GITHUB_REF_NAME}" "lore-${TARGET}.tar.gz" --clobber
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: "Repository Checkout"
+        uses: actions/checkout@v6
+
+      - name: "게시"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "${GITHUB_REF_NAME}" --draft=false
