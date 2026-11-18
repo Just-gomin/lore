@@ -20,6 +20,7 @@ pub mod output;
 pub mod query;
 pub mod report;
 pub mod source;
+pub mod sync;
 pub mod why;
 
 use std::path::Path;
@@ -110,6 +111,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
                 config::discover(cwd).and_then(|config| check::check(&config, &options))
             })
             .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
+        Request::Sync { base, dry_run } => config::discover(cwd)
+            .and_then(|config| sync::sync(&config, &base, dry_run))
+            .map(|report| output::success(&report, for_human, sync::render)),
         Request::Uninstall {
             dry_run,
             with_config,

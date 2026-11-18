@@ -194,10 +194,11 @@ fn check_of(code: &str) -> &'static str {
 }
 
 pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreError> {
-    let changes = options
+    let diff = options
         .base
-        .map(|base| git::changed_files(&config.root, base))
+        .map(|base| Diff::new(config, base))
         .transpose()?;
+    let changes = diff.as_ref().map(|diff| diff.changes.as_slice());
     let (corpus, mut problems) = source::read_lenient(config);
     let files = git::tracked_files(&config.root)?;
     if let Err(more) = graph::build(&corpus, &config.root, &files) {
@@ -237,11 +238,12 @@ pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreErro
         index_check(config, &corpus, sources_ok)?,
         guide_check(config)?,
         spec_update_check(
+            config,
             &corpus,
-            changes.as_deref(),
+            diff.as_ref(),
             &options.pr_body.map(parse_no_impact).unwrap_or_default(),
-        ),
-        unmapped_check(config, &corpus, changes.as_deref()),
+        )?,
+        unmapped_check(config, &corpus, changes),
     ];
     let report = options
         .report
@@ -306,36 +308,100 @@ pub fn parse_no_impact(text: &str) -> BTreeMap<String, String> {
     found
 }
 
-/// 바뀐 파일이 구현함이나 검증함으로 닿는 스펙이 같은 비교 범위에서 바뀌었는지.
-///
-/// 이름이 바뀐 파일은 원래 경로와 새 경로를 모두 보고, 삭제된 파일은 지워지기 전 경로를 본다.
-/// 글롭은 지금 스펙의 것을 쓴다. 기준 커밋과 글롭이 다르면 그 스펙 파일이 바뀐 것이라 결과가 같다.
-fn spec_update_check(
-    corpus: &source::Corpus,
-    changes: Option<&[Change]>,
-    no_impact: &BTreeMap<String, String>,
-) -> Check {
-    const ID: &str = "spec_update";
-    const LABEL: &str = "스펙 동반 갱신";
-    let Some(changes) = changes else {
-        return Check::skipped(ID, LABEL, false, NO_BASE);
-    };
-    let touched: BTreeSet<&str> = changes
+/// 비교 기준과 그 이후 바뀐 파일.
+pub(crate) struct Diff {
+    pub merge_base: String,
+    pub changes: Vec<Change>,
+}
+
+impl Diff {
+    pub fn new(config: &Config, base: &str) -> Result<Diff, LoreError> {
+        let merge_base = git::merge_base(&config.root, base)?;
+        let changes = git::changed_files(&config.root, &merge_base)?;
+        Ok(Diff {
+            merge_base,
+            changes,
+        })
+    }
+
+    /// 스펙 본문이 비교 기준 이후 바뀌었는지. 머리말만 바뀐 것은 본문이 바뀐 것이 아니다.
+    ///
+    /// 기준 커밋에 없던 스펙은 본문을 새로 쓴 것으로 본다. 이름이 바뀐 스펙은 원래 경로로 견준다.
+    pub fn body_changed(&self, config: &Config, doc: &source::Document) -> Result<bool, LoreError> {
+        let Some(change) = self.changes.iter().find(|change| change.path == doc.path) else {
+            return Ok(false);
+        };
+        let before_path = change.from.as_deref().unwrap_or(&doc.path);
+        let Some(before) = git::show(&config.root, &self.merge_base, before_path) else {
+            return Ok(true);
+        };
+        let now = std::fs::read_to_string(config.root.join(&doc.path)).map_err(|error| {
+            LoreError::Io {
+                path: doc.path.clone(),
+                message: error.to_string(),
+            }
+        })?;
+        Ok(body(&before) != body(&now))
+    }
+}
+
+/// 머리말 뒤 본문. 줄바꿈 차이(`core.autocrlf`)는 견주지 않는다.
+fn body(text: &str) -> String {
+    crate::frontmatter::split(text)
+        .map_or(text, |(_, body)| body)
+        .replace("\r\n", "\n")
+}
+
+/// 바뀐 경로. 이름이 바뀐 파일은 원래 경로와 새 경로, 삭제된 파일은 지워지기 전 경로다.
+fn touched_paths(changes: &[Change]) -> BTreeSet<&str> {
+    changes
         .iter()
         .flat_map(|change| std::iter::once(change.path.as_str()).chain(change.from.as_deref()))
+        .collect()
+}
+
+/// 바뀐 파일이 구현함이나 검증함으로 닿는 스펙과 그 파일. 스펙 ID 순이다.
+///
+/// 글롭은 지금 스펙의 것을 쓴다. 기준 커밋과 글롭이 다르면 그 스펙 파일이 바뀐 것이다.
+pub(crate) fn reached_specs<'a>(
+    corpus: &'a source::Corpus,
+    changes: &[Change],
+) -> Vec<(&'a source::Document, Vec<String>)> {
+    let touched = touched_paths(changes);
+    let mut reached: Vec<_> = SpecGlobs::all(corpus)
+        .into_iter()
+        .filter_map(|spec| {
+            let files: Vec<String> = touched
+                .iter()
+                .filter(|path| spec.matches(path))
+                .map(|path| path.to_string())
+                .collect();
+            (!files.is_empty()).then_some((spec.doc, files))
+        })
         .collect();
+    reached.sort_by(|a, b| a.0.id.cmp(&b.0.id));
+    reached
+}
+
+/// 바뀐 파일이 구현함이나 검증함으로 닿는 스펙이 같은 비교 범위에서 바뀌었는지.
+///
+/// 스펙 본문이 바뀌어야 함께 바뀐 것으로 본다. `lore sync`가 머리말의 경로만 고친 스펙은
+/// 본문이 그대로라 경고가 남는다.
+fn spec_update_check(
+    config: &Config,
+    corpus: &source::Corpus,
+    diff: Option<&Diff>,
+    no_impact: &BTreeMap<String, String>,
+) -> Result<Check, LoreError> {
+    const ID: &str = "spec_update";
+    const LABEL: &str = "스펙 동반 갱신";
+    let Some(diff) = diff else {
+        return Ok(Check::skipped(ID, LABEL, false, NO_BASE));
+    };
     let mut findings = Vec::new();
-    for spec in SpecGlobs::all(corpus) {
-        let files: Vec<String> = touched
-            .iter()
-            .filter(|path| spec.matches(path))
-            .map(|path| path.to_string())
-            .collect();
-        if files.is_empty() {
-            continue;
-        }
-        let reason = no_impact.get(&spec.doc.id).cloned();
-        let outcome = if touched.contains(spec.doc.path.as_str()) {
+    for (doc, files) in reached_specs(corpus, &diff.changes) {
+        let reason = no_impact.get(&doc.id).cloned();
+        let outcome = if diff.body_changed(config, doc)? {
             Outcome::Updated
         } else if reason.is_some() {
             Outcome::NoImpact
@@ -343,18 +409,18 @@ fn spec_update_check(
             Outcome::Warned
         };
         findings.push(Finding {
-            spec: Some(spec.doc.id.clone()),
+            spec: Some(doc.id.clone()),
             files,
             reason: reason.filter(|_| outcome == Outcome::NoImpact),
             outcome,
         });
     }
-    Check::judged(
+    Ok(Check::judged(
         ID,
         LABEL,
         findings,
         "스펙 본문을 바뀐 코드에 맞게 고치세요. 영향이 없으면 PR 설명에 'lore: no-impact <스펙 ID> <사유>'를 적으세요.",
-    )
+    ))
 }
 
 /// 새로 생긴 파일이 어떤 스펙의 `paths`, `tests`에 맞는지.
