@@ -35,10 +35,11 @@ lore sync --base origin/main
 
 ## 4. 본문 고치기
 
-`specs_to_review`의 스펙마다 `files`에 나온 파일의 변경을 읽습니다.
+`specs_to_review`의 스펙마다 `files`에 나온 파일의 변경을 읽습니다. 커밋하지 않은 변경까지 보도록 merge-base와 지금 작업 트리를 견줍니다. 이름이 바뀐 파일은 `files`에 원래 경로로 나오므로, 첫 명령에서 새 경로를 찾아 함께 넣습니다.
 
 ```sh
-git diff origin/main... -- <파일 경로>
+git diff -M --stat "$(git merge-base origin/main HEAD)"
+git diff -M "$(git merge-base origin/main HEAD)" -- <파일 경로> <새 경로>
 ```
 
 스펙 본문에서 이번 변경으로 틀리게 된 문장만 고칩니다.

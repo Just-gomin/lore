@@ -6,11 +6,11 @@
 use serde::Serialize;
 use serde_yaml_ng::Value;
 
-use crate::check::reached_specs;
+use crate::check::{Diff, reached_specs};
 use crate::config::Config;
 use crate::error::LoreError;
 use crate::git::ChangeKind;
-use crate::{frontmatter, git, graph, source};
+use crate::{frontmatter, graph, source};
 
 #[derive(Debug, Serialize)]
 pub struct SyncReport {
@@ -60,9 +60,9 @@ pub struct Review {
 const FIELDS: [&str; 2] = ["paths", "tests"];
 
 pub fn sync(config: &Config, base: &str, dry_run: bool) -> Result<SyncReport, LoreError> {
-    let merge_base = git::merge_base(&config.root, base)?;
-    let changes = git::changed_files(&config.root, &merge_base)?;
-    let renames: Vec<(&str, &str)> = changes
+    let diff = Diff::new(config, base)?;
+    let renames: Vec<(&str, &str)> = diff
+        .changes
         .iter()
         .filter(|change| change.kind == ChangeKind::Renamed)
         .filter_map(|change| Some((change.from.as_deref()?, change.path.as_str())))
@@ -121,12 +121,8 @@ pub fn sync(config: &Config, base: &str, dry_run: bool) -> Result<SyncReport, Lo
     }
 
     let mut specs_to_review = Vec::new();
-    for (doc, files) in reached_specs(&corpus, &changes) {
-        let now = read(config, &doc.path)?;
-        let before = git::show(&config.root, &merge_base, &doc.path);
-        // 기준 커밋에 없던 스펙은 본문을 새로 쓴 것이다.
-        let unchanged = before.is_some_and(|before| body(&before) == body(&now));
-        if unchanged {
+    for (doc, files) in reached_specs(&corpus, &diff.changes) {
+        if !diff.body_changed(config, doc)? {
             specs_to_review.push(Review {
                 spec: doc.id.clone(),
                 path: doc.path.clone(),
@@ -137,15 +133,11 @@ pub fn sync(config: &Config, base: &str, dry_run: bool) -> Result<SyncReport, Lo
 
     Ok(SyncReport {
         dry_run,
-        merge_base,
+        merge_base: diff.merge_base,
         fixed,
         to_check,
         specs_to_review,
     })
-}
-
-fn body(text: &str) -> &str {
-    frontmatter::split(text).map_or(text, |(_, body)| body)
 }
 
 fn read(config: &Config, path: &str) -> Result<String, LoreError> {
@@ -176,6 +168,12 @@ fn normalize(entry: &str) -> &str {
 /// 블록 형식(`- 경로`)과 한 줄 형식(`[a, b]`)을 고친다. 고친 뒤 다시 읽어 `to`가 들어갔는지 확인하고,
 /// 고치지 못했으면 `None`이다.
 pub fn replace_item(text: &str, field: &str, entry: &str, to: &str) -> Option<String> {
+    let bom = if text.starts_with('\u{feff}') {
+        "\u{feff}"
+    } else {
+        ""
+    };
+    let text = &text[bom.len()..];
     let lines: Vec<&str> = text.split_inclusive('\n').collect();
     if lines.first()?.trim_end() != "---" {
         return None;
@@ -193,7 +191,7 @@ pub fn replace_item(text: &str, field: &str, entry: &str, to: &str) -> Option<St
     let rest = &lines[start][key.len()..];
     if rest.trim_start().starts_with('[') {
         let open = key.len() + rest.find('[')?;
-        let close = lines[start].rfind(']')?;
+        let close = open + closing_bracket(&lines[start][open..])?;
         let inner = &lines[start][open + 1..close];
         let items: Vec<String> = inner
             .split(',')
@@ -235,8 +233,22 @@ pub fn replace_item(text: &str, field: &str, entry: &str, to: &str) -> Option<St
     if !replaced {
         return None;
     }
-    let edited = out.concat();
+    let edited = format!("{bom}{}", out.concat());
     contains_item(&edited, field, to).then_some(edited)
+}
+
+/// `[`로 시작하는 글에서 짝이 되는 `]`의 위치. 따옴표 안의 `]`는 건너뛴다.
+fn closing_bracket(text: &str) -> Option<usize> {
+    let mut quote = None;
+    for (i, ch) in text.char_indices().skip(1) {
+        match (quote, ch) {
+            (None, '\'' | '"') => quote = Some(ch),
+            (Some(q), c) if c == q => quote = None,
+            (None, ']') => return Some(i),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// 목록 항목 하나의 값이 `entry`면 `to`로 바꾼다. 앞뒤 공백과 따옴표 모양은 그대로 둔다.
@@ -250,7 +262,12 @@ fn replace_scalar(item: &str, entry: &str, to: &str) -> Option<String> {
         }
         _ => (None, value),
     };
-    if inner != entry {
+    let unquoted = match quote {
+        Some('\'') => inner.replace("''", "'"),
+        Some(_) => inner.replace("\\\"", "\"").replace("\\\\", "\\"),
+        None => inner.to_string(),
+    };
+    if unquoted != entry {
         return None;
     }
     let replaced = match quote {
@@ -262,20 +279,22 @@ fn replace_scalar(item: &str, entry: &str, to: &str) -> Option<String> {
     Some(format!("{lead}{replaced}{tail}"))
 }
 
+/// 따옴표 없이 쓰면 같은 문자열로 읽히지 않는 값인지. 한 줄 목록의 쉼표와 괄호도 따옴표가 필요하다.
 fn needs_quote(value: &str) -> bool {
-    value.contains(": ")
-        || value.contains(" #")
-        || value.contains([',', '[', ']', '{', '}'])
-        || value.starts_with(['&', '*', '!', '|', '>', '\'', '"', '%', '@', '`', '-', '?'])
+    value.contains([',', '[', ']', '{', '}', '#', '\t'])
+        || value.starts_with(['-', '?', ':'])
+        || serde_yaml_ng::from_str::<Value>(value).ok() != Some(Value::String(value.to_string()))
 }
 
 /// 블록 항목의 값과 줄 끝 주석(줄바꿈 포함)을 나눈다.
 fn split_comment(rest: &str) -> (&str, &str) {
     let content_end = rest.trim_end_matches(['\r', '\n']).len();
     let mut quote = None;
+    let value_start = rest.len() - rest.trim_start().len();
     for (i, ch) in rest[..content_end].char_indices() {
         match (quote, ch) {
-            (None, '\'' | '"') => quote = Some(ch),
+            // 따옴표는 값의 첫 글자일 때만 감싼다. `it's.ts`의 `'`는 글자다.
+            (None, '\'' | '"') if i == value_start => quote = Some(ch),
             (Some(q), c) if c == q => quote = None,
             (None, '#') if rest[..i].ends_with([' ', '\t']) => {
                 let value_end = rest[..i].trim_end().len();
@@ -394,11 +413,26 @@ mod tests {
     }
 
     #[test]
+    fn 주석의_괄호와_아포스트로피와_bom을_견딘다() {
+        let text = "\u{feff}---\npaths: [src/old.ts] # see [x], src/old.ts\ntests:\n  - src/it's.ts # 메모\n  - 'src/o''k.ts'\n---\n";
+        let edited = replace_item(text, "paths", "src/old.ts", "src/new.ts").unwrap();
+        assert_eq!(edited, text.replacen("[src/old.ts]", "[src/new.ts]", 1));
+        let edited = replace_item(text, "tests", "src/it's.ts", "src/it.ts").unwrap();
+        assert!(edited.contains("  - src/it.ts # 메모\n"));
+        let edited = replace_item(text, "tests", "src/o'k.ts", "src/ok.ts").unwrap();
+        assert!(edited.contains("  - 'src/ok.ts'\n"));
+    }
+
+    #[test]
     fn 따옴표가_필요한_새_경로는_작은따옴표로_감싼다() {
         let text = "---\npaths:\n  - src/old.ts\n---\n";
         assert_eq!(
             replace_item(text, "paths", "src/old.ts", "src/a, b.ts").unwrap(),
             "---\npaths:\n  - 'src/a, b.ts'\n---\n"
         );
+        for value in ["true", "123", "null", "dir/a:", "#a"] {
+            assert!(needs_quote(value), "{value}");
+        }
+        assert!(!needs_quote("services/payment/index.ts"));
     }
 }

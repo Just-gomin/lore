@@ -203,3 +203,44 @@ fn 비교_기준이_없으면_사용법_오류다() {
     let output = lore_in(dir.path(), &["sync"]);
     assert_eq!(output.status.code(), Some(2));
 }
+
+#[test]
+fn 경로만_고친_스펙은_lore_check에서_스펙_동반_갱신_경고가_남는다() {
+    let dir = feature_repo();
+    move_file(
+        dir.path(),
+        "services/payment/index.ts",
+        "services/payment/main.ts",
+    );
+    assert!(
+        lore_in(dir.path(), &["sync", "--base", "main"])
+            .status
+            .success()
+    );
+    let report = json(&lore_in(dir.path(), &["check", "--base", "main"]));
+    let check = report["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|check| check["id"] == "spec_update")
+        .unwrap();
+    assert_eq!(check["status"], "warn");
+    assert_eq!(check["findings"][0]["spec"], "payment");
+    assert_eq!(check["findings"][0]["outcome"], "warned");
+}
+
+#[test]
+fn 이름을_바꾼_스펙도_원래_경로로_본문을_견준다() {
+    let dir = feature_repo();
+    move_file(
+        dir.path(),
+        "docs/specs/payment-retry.md",
+        "docs/specs/retry.md",
+    );
+    let policy = dir.path().join("services/payment/retry/policy.ts");
+    let code = std::fs::read_to_string(&policy).unwrap();
+    std::fs::write(&policy, format!("{code}// 간격 조정\n")).unwrap();
+    let report = json(&lore_in(dir.path(), &["sync", "--base", "main"]));
+    assert_eq!(report["specs_to_review"][0]["spec"], "payment-retry");
+    assert_eq!(report["specs_to_review"][0]["path"], "docs/specs/retry.md");
+}

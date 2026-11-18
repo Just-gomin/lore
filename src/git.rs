@@ -110,7 +110,13 @@ pub enum ChangeKind {
 
 /// `base`와 `HEAD`의 merge-base. PR의 비교 기준이다.
 pub fn merge_base(root: &Path, base: &str) -> Result<String, LoreError> {
-    let output = git(root, &["merge-base", base, "HEAD"])?;
+    let output = git(root, &["merge-base", base, "HEAD"]).map_err(|error| match error {
+        // 공통 조상이 없으면 git이 아무 말 없이 실패한다.
+        LoreError::Git { message } if message.is_empty() => LoreError::Git {
+            message: format!("'{base}'와 HEAD의 공통 조상을 찾지 못했습니다."),
+        },
+        other => other,
+    })?;
     Ok(String::from_utf8_lossy(&output).trim().to_string())
 }
 
