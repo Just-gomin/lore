@@ -88,6 +88,10 @@ pub enum Request {
     Check {
         /// 원본의 최신 판 목록 파일.
         origins: Option<String>,
+        /// 바뀐 파일을 구할 비교 기준 ref.
+        base: Option<String>,
+        /// PR 설명을 담은 파일.
+        pr_body: Option<String>,
     },
     Why {
         target: String,
@@ -124,6 +128,8 @@ impl Request {
             Command::Build => Request::Build,
             Command::Check => Request::Check {
                 origins: matches.get_one::<String>(ORIGINS).cloned(),
+                base: matches.get_one::<String>(BASE).cloned(),
+                pr_body: matches.get_one::<String>(PR_BODY).cloned(),
             },
             Command::Impact => Request::Impact {
                 target: matches
@@ -243,6 +249,8 @@ const SOURCE: &str = "source";
 const FROM: &str = "from";
 const DRY_RUN: &str = "dry-run";
 const ORIGINS: &str = "origins";
+const BASE: &str = "base";
+const PR_BODY: &str = "pr-body";
 const NO_SKILLS: &str = "no-skills";
 const WITH_CONFIG: &str = "with-config";
 
@@ -309,7 +317,10 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .value_parser(TRAVERSABLE.map(EdgeKind::name))
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
-        Command::Check => definition.arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일")),
+        Command::Check => definition
+            .arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일"))
+            .arg(Arg::new(BASE).long(BASE).value_name("ref"))
+            .arg(Arg::new(PR_BODY).long(PR_BODY).value_name("파일")),
         Command::Uninstall => definition
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue))
             .arg(
@@ -455,7 +466,14 @@ mod tests {
         for command in Command::ALL {
             let (argv, expected) = match command {
                 Command::Build => (vec!["build"], Request::Build),
-                Command::Check => (vec!["check"], Request::Check { origins: None }),
+                Command::Check => (
+                    vec!["check"],
+                    Request::Check {
+                        origins: None,
+                        base: None,
+                        pr_body: None,
+                    },
+                ),
                 Command::Why => (
                     vec!["why", "payment-retry"],
                     Request::Why {
