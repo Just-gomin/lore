@@ -36,10 +36,11 @@
 | `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
 | `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬 |
-| `src/check.rs`       | `lore check`: 소스와 코드가 어긋났는지 검사          |
+| `src/check.rs`       | `lore check`: 기계적 검사와 판단이 드는 검사         |
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
 | `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
+| `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬      |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |

@@ -649,3 +649,104 @@ fn 비교_기준을_찾지_못하면_git_오류다() {
     assert_eq!(output.status.code(), Some(1));
     assert_eq!(json(&output)["error"]["code"], "git");
 }
+
+/// 파일마다 줄을 하나 더해 커밋한다.
+fn touch_commit(dir: &Path, files: &[&str], message: &str) {
+    for file in files {
+        let path = dir.join(file);
+        let text = std::fs::read_to_string(&path).unwrap();
+        std::fs::write(path, format!("{text}// {message}\n")).unwrap();
+    }
+    commit_all(dir, message);
+}
+
+/// 나눌 후보와 합칠 후보가 모두 나오는 이력을 만든다.
+fn history_repo() -> TempDir {
+    let dir = clean_repo();
+    let charge = "services/payment/core/charge.ts";
+    let policy = "services/payment/retry/policy.ts";
+    touch_commit(dir.path(), &[policy, charge], "1");
+    touch_commit(
+        dir.path(),
+        &["services/payment/retry/queue.ts", charge],
+        "2",
+    );
+    touch_commit(dir.path(), &[policy], "3");
+    touch_commit(
+        dir.path(),
+        &[
+            "services/payment/index.ts",
+            charge,
+            policy,
+            "services/notification/retry-alert.ts",
+        ],
+        "4",
+    );
+    dir
+}
+
+#[test]
+fn 보고는_report를_줄_때만_내고_병합을_막지_않는다() {
+    let dir = history_repo();
+    assert!(
+        json(&lore_in(dir.path(), &["check"]))
+            .get("report")
+            .is_none()
+    );
+
+    let output = lore_in(dir.path(), &["check", "--report"]);
+    assert_eq!(output.status.code(), Some(0));
+    let report = &json(&output)["report"];
+    assert_eq!(
+        report["unsourced_decisions"],
+        serde_json::json!({
+            "count": 2,
+            "total": 4,
+            "ratio": 0.5,
+            "decisions": ["ADR-20260918-retry-inline", "ADR-20261110-log-format"],
+        })
+    );
+    // 고정 예제의 첫 커밋과 스펙에 닿지 않는 설치 커밋은 세지 않는다.
+    assert_eq!(
+        report["spec_size"],
+        serde_json::json!({
+            "commits": 4,
+            "thresholds": {"split_percent": 50, "merge_percent": 80, "group_size": 4},
+            "split": [
+                {"spec": "payment-core", "commits": 3, "ratio": 0.75},
+                {"spec": "payment-retry", "commits": 4, "ratio": 1.0},
+            ],
+            "merge": [
+                {"specs": ["payment", "payment-notification"], "together": 1, "either": 1, "ratio": 1.0},
+            ],
+            "groups": [
+                {"specs": ["payment", "payment-core", "payment-notification", "payment-retry"], "commits": 1},
+            ],
+        })
+    );
+}
+
+#[test]
+fn 보고의_사람용_출력은_검사_결과_뒤에_붙는다() {
+    let dir = history_repo();
+    let output = lore_in(dir.path(), &["check", "--report", "--for-human"]);
+    let text = stdout(&output);
+    assert!(
+        text.ends_with(
+            "통과  안내문 일치
+
+보고
+  근거 없는 결정: 2/4 (50%)
+  스펙을 건드린 커밋 4건 기준
+  나눌 스펙 후보 (커밋의 50% 이상):
+    payment-core 3/4 (75%)
+    payment-retry 4/4 (100%)
+  합칠 스펙 후보 (둘 중 하나가 바뀐 커밋의 80% 이상에서 함께 바뀜):
+    payment, payment-notification 1/1 (100%)
+  합칠 스펙 후보 (한 커밋에서 4개 이상 함께 바뀜):
+    payment, payment-core, payment-notification, payment-retry 1건
+"
+        ),
+        "{text}"
+    );
+}
