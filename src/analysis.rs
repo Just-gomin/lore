@@ -120,41 +120,56 @@ fn module_specifiers(parser: &mut Parser, path: &str, text: &str) -> Option<(Vec
     Some((found, root.has_error()))
 }
 
-fn collect(node: Node, source: &[u8], found: &mut Vec<String>) {
-    if node.is_error() {
-        return;
+/// 트리를 돌며 모듈 경로를 모은다. 깊이 중첩된 코드(긴 문자열 이어 붙이기 등)에서 스택이 넘치지 않게
+/// 재귀 대신 커서로 돈다. 문법 오류로 읽은 곳(`ERROR`) 안으로는 들어가지 않는다.
+fn collect(root: Node, source: &[u8], found: &mut Vec<String>) {
+    let mut cursor = root.walk();
+    loop {
+        let node = cursor.node();
+        let enter = !node.is_error();
+        if enter {
+            found.extend(specifier_of(node, source));
+        }
+        if enter && cursor.goto_first_child() {
+            continue;
+        }
+        loop {
+            if cursor.goto_next_sibling() {
+                break;
+            }
+            if !cursor.goto_parent() {
+                return;
+            }
+        }
     }
+}
+
+/// 노드 하나가 가져오는 모듈 경로.
+fn specifier_of(node: Node, source: &[u8]) -> Option<String> {
     match node.kind() {
         "import_statement" | "export_statement" => {
-            if let Some(value) = node
-                .child_by_field_name("source")
-                .and_then(|string| string_value(string, source))
-            {
-                found.push(value);
-            }
+            // TypeScript의 `import x = require("y")`는 경로가 `import_require_clause` 안에 있다.
+            let string = node.child_by_field_name("source").or_else(|| {
+                let mut cursor = node.walk();
+                node.named_children(&mut cursor)
+                    .find(|child| child.kind() == "import_require_clause")
+                    .and_then(|clause| clause.child_by_field_name("source"))
+            });
+            string.and_then(|string| string_value(string, source))
         }
         "call_expression" => {
-            let callee = node.child_by_field_name("function");
-            let is_loader = callee.is_some_and(|callee| {
-                callee.kind() == "import"
-                    || (callee.kind() == "identifier"
-                        && callee.utf8_text(source).ok() == Some("require"))
-            });
-            if is_loader
-                && let Some(args) = node.child_by_field_name("arguments")
-                && args.named_child_count() == 1
-                && let Some(value) = args
-                    .named_child(0)
-                    .and_then(|arg| string_value(arg, source))
-            {
-                found.push(value);
+            let callee = node.child_by_field_name("function")?;
+            let is_loader = callee.kind() == "import"
+                || (callee.kind() == "identifier"
+                    && callee.utf8_text(source).ok() == Some("require"));
+            let args = node.child_by_field_name("arguments")?;
+            if !is_loader || args.named_child_count() != 1 {
+                return None;
             }
+            args.named_child(0)
+                .and_then(|arg| string_value(arg, source))
         }
-        _ => {}
-    }
-    let mut cursor = node.walk();
-    for child in node.children(&mut cursor) {
-        collect(child, source, found);
+        _ => None,
     }
 }
 
@@ -164,9 +179,16 @@ fn string_value(node: Node, source: &[u8]) -> Option<String> {
         return None;
     }
     let mut cursor = node.walk();
-    let value: String = node
-        .named_children(&mut cursor)
-        .filter(|child| child.kind() == "string_fragment")
+    let children: Vec<Node> = node.named_children(&mut cursor).collect();
+    // 이스케이프가 든 경로는 풀지 않고 버린다. 글자 그대로 이으면 다른 파일을 가리키게 된다.
+    if children
+        .iter()
+        .any(|child| child.kind() != "string_fragment")
+    {
+        return None;
+    }
+    let value: String = children
+        .iter()
         .filter_map(|child| child.utf8_text(source).ok())
         .collect();
     (!value.is_empty()).then_some(value)
@@ -180,7 +202,11 @@ enum Specifier {
 }
 
 fn classify(specifier: &str) -> Specifier {
-    if specifier.starts_with("./") || specifier.starts_with("../") || specifier == "." {
+    if specifier.starts_with("./")
+        || specifier.starts_with("../")
+        || specifier == "."
+        || specifier == ".."
+    {
         Specifier::Relative
     } else {
         Specifier::Bare
@@ -191,7 +217,26 @@ fn classify(specifier: &str) -> Specifier {
 fn resolve_relative(from: &str, specifier: &str, known: &HashSet<&str>) -> Option<String> {
     let dir = from.rsplit_once('/').map_or("", |(dir, _)| dir);
     let joined = normalize(&format!("{dir}/{specifier}"))?;
+    // `./lib/`처럼 `/`로 끝나면 폴더만 찾는다.
+    if specifier.ends_with('/') {
+        return resolve_index(&joined, known);
+    }
     resolve_path(&joined, known)
+}
+
+const BARE: [&str; 4] = [".ts", ".tsx", ".js", ".jsx"];
+
+/// 폴더의 `index` 파일.
+fn resolve_index(dir: &str, known: &HashSet<&str>) -> Option<String> {
+    BARE.iter()
+        .map(|ext| {
+            if dir.is_empty() {
+                format!("index{ext}")
+            } else {
+                format!("{dir}/index{ext}")
+            }
+        })
+        .find(|candidate| known.contains(candidate.as_str()))
 }
 
 fn is_tracked_asset(from: &str, specifier: &str, known: &HashSet<&str>) -> bool {
@@ -201,8 +246,9 @@ fn is_tracked_asset(from: &str, specifier: &str, known: &HashSet<&str>) -> bool 
 
 /// 확장자를 보충하고 폴더의 `index`를 찾아 파일에 잇는다.
 pub(crate) fn resolve_path(path: &str, known: &HashSet<&str>) -> Option<String> {
-    const BARE: [&str; 4] = [".ts", ".tsx", ".js", ".jsx"];
-    if known.contains(path) && is_source(path) {
+    // 분석하는 파일만 잇는다. `.d.ts`처럼 분석하지 않는 파일로 가면 노드가 없는 엣지가 된다.
+    let found = |candidate: &str| known.contains(candidate) && is_source(candidate);
+    if found(path) {
         return Some(path.to_string());
     }
     // `.js`로 적은 경로가 실제로는 `.ts` 파일인 경우
@@ -216,7 +262,7 @@ pub(crate) fn resolve_path(path: &str, known: &HashSet<&str>) -> Option<String> 
         if let Some(stem) = path.strip_suffix(written) {
             for ext in *actual {
                 let candidate = format!("{stem}{ext}");
-                if known.contains(candidate.as_str()) {
+                if found(&candidate) {
                     return Some(candidate);
                 }
             }
@@ -224,22 +270,11 @@ pub(crate) fn resolve_path(path: &str, known: &HashSet<&str>) -> Option<String> 
     }
     for ext in BARE {
         let candidate = format!("{path}{ext}");
-        if known.contains(candidate.as_str()) {
+        if found(&candidate) {
             return Some(candidate);
         }
     }
-    let base = path.trim_end_matches('/');
-    for ext in BARE {
-        let candidate = if base.is_empty() {
-            format!("index{ext}")
-        } else {
-            format!("{base}/index{ext}")
-        };
-        if known.contains(candidate.as_str()) {
-            return Some(candidate);
-        }
-    }
-    None
+    resolve_index(path, known)
 }
 
 /// `.`과 `..`를 풀어 프로젝트 홈 기준 경로로 만든다. 홈 밖으로 나가면 `None`이다.
@@ -295,6 +330,19 @@ mod tests {
         assert_eq!(resolve("src/lib/y.ts", "../a").as_deref(), Some("src/a.ts"));
         assert_eq!(resolve("src/x.ts", "../../../etc"), None);
         assert_eq!(resolve("src/x.ts", "./none"), None);
+        // `/`로 끝나면 같은 이름의 파일보다 폴더의 index를 찾는다.
+        let files = known(&["src/lib.ts", "src/lib/index.ts", "src/types.d.ts"]);
+        assert_eq!(
+            resolve_relative("src/x.ts", "./lib/", &files).as_deref(),
+            Some("src/lib/index.ts")
+        );
+        assert_eq!(
+            resolve_relative("src/x.ts", "./lib", &files).as_deref(),
+            Some("src/lib.ts")
+        );
+        // 분석하지 않는 선언 파일로는 잇지 않는다.
+        assert_eq!(resolve_relative("src/x.ts", "./types.d", &files), None);
+        assert!(matches!(classify(".."), Specifier::Relative));
     }
 
     #[test]
@@ -313,6 +361,22 @@ mod tests {
         let (found, had_error) = module_specifiers(&mut parser, "x.ts", text).unwrap();
         assert_eq!(found, ["./a", "./t", "./b", "./c", "./d", "./e"]);
         assert!(!had_error);
+
+        let text = "import x = require('./x');\nconst y = require('./li\\x62');\n";
+        let (found, _) = module_specifiers(&mut parser, "y.ts", text).unwrap();
+        assert_eq!(found, ["./x"]);
+    }
+
+    #[test]
+    fn 깊이_중첩된_코드에서도_스택이_넘치지_않는다() {
+        let mut parser = Parser::new();
+        let mut text = String::from("import a from './a';\nconst s = \"x\"");
+        for _ in 0..50_000 {
+            text.push_str(" + \"x\"");
+        }
+        text.push_str(";\n");
+        let (found, _) = module_specifiers(&mut parser, "deep.js", &text).unwrap();
+        assert_eq!(found, ["./a"]);
     }
 
     #[test]

@@ -94,3 +94,21 @@ fn 디비를_만든_lore_버전이_다르면_조회_전에_다시_만든다() {
     let report = json(&lore_in(dir.path(), &["why", "payment-core"]));
     assert_eq!(report["rebuilt"], true);
 }
+
+#[test]
+fn 스펙에_속하지_않은_분석_파일을_물으면_스펙이_없다고_알린다() {
+    let dir = repo("analysis");
+    let output = lore_in(dir.path(), &["why", "scripts/seed.mjs"]);
+    assert!(output.status.success());
+    let report = json(&output);
+    assert_eq!(report["target"]["kind"], "file");
+    assert_eq!(report["features"], serde_json::json!([]));
+    let text = common::stdout(&lore_in(
+        dir.path(),
+        &["why", "scripts/seed.mjs", "--for-human"],
+    ));
+    assert!(
+        text.contains("scripts/seed.mjs 에 연결된 스펙이 없습니다."),
+        "{text}"
+    );
+}
