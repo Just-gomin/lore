@@ -5,6 +5,7 @@ members = [
     "connectors/git",
     "connectors/github",
     "extractors/markdown",
+    "extractors/xlsx",
 ]
 resolver = "3"
 
