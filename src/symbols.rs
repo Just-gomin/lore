@@ -3,7 +3,7 @@
 //! 한 파일의 구문 트리에서 정보를 뽑는 일([`extract`])과, 파일들을 이어 심볼 → 심볼 의존을 만드는 일([`link`])로 나뉜다.
 //! 타입 검사는 하지 않는다. 가져온 이름을 어느 최상위 선언이 쓰는지까지만 본다.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use tree_sitter::Node;
 
@@ -12,9 +12,9 @@ use tree_sitter::Node;
 pub struct FileSymbols {
     /// 이 파일에서 정의해 내보내는 이름. 내보낸 이름 → 그 선언의 지역 이름(같은 선언을 다른 이름으로 내보낼 수 있다).
     pub defined: BTreeMap<String, String>,
-    /// 클래스 멤버 심볼. `Class.method`
+    /// 최상위 클래스의 멤버. `클래스의 지역 이름.method`. 클래스를 내보냈을 때만 심볼이 된다.
     pub members: BTreeSet<String>,
-    /// `export { a as b } from "./x"`: 내보낸 이름 → (모듈 경로, 가져온 이름)
+    /// `export { a as b } from "./x"`: 내보낸 이름 → (모듈 경로, 가져온 이름). `export * as ns`는 가져온 이름이 `*`
     pub reexports: BTreeMap<String, (String, String)>,
     /// `export * from "./x"`의 모듈 경로
     pub stars: Vec<String>,
@@ -66,19 +66,19 @@ pub fn extract(root: Node, source: &[u8]) -> FileSymbols {
             "import_statement" => read_import(statement, source, &mut symbols),
             "export_statement" => read_export(statement, source, &mut symbols),
             _ => {
+                let statement = unwrap_ambient(statement);
                 let names = declared_names(statement, source);
+                if let Some(class) = names.first() {
+                    record_members(statement, source, class, &mut symbols);
+                }
                 record_uses(statement, source, &names, &mut symbols);
             }
         }
     }
-    // 가져온 이름만 쓴 것으로 남긴다. 지역 변수와 같은 이름은 빼고, 이름 전체를 가져온 것은 멤버가 있어야 한다.
+    // 가져온 이름만 쓴 것으로 남긴다.
     let imports = symbols.imports.clone();
     for uses in symbols.uses.values_mut() {
-        uses.retain(|used| match imports.get(&used.local) {
-            Some((_, name)) if name == "*" => used.member.is_some(),
-            Some(_) => used.member.is_none(),
-            None => false,
-        });
+        uses.retain(|used| imports.contains_key(&used.local));
     }
     symbols.uses.retain(|_, uses| !uses.is_empty());
     symbols
@@ -155,15 +155,22 @@ fn read_export(statement: Node, source: &[u8], symbols: &mut FileSymbols) {
                     symbols.reexports.insert(exported, (module.clone(), name));
                 }
             }
-            // export * from "./x"
-            None if !children
+            None => match children
                 .iter()
-                .any(|child| child.kind() == "namespace_export") =>
+                .find(|child| child.kind() == "namespace_export")
             {
-                symbols.stars.push(module);
-            }
-            // export * as ns from "./x"
-            None => {}
+                // export * as ns from "./x"
+                Some(namespace) => {
+                    let mut inner = namespace.walk();
+                    if let Some(name) = namespace.named_children(&mut inner).next() {
+                        let name = string_of(Some(name), source)
+                            .unwrap_or_else(|| text(name, source).to_string());
+                        symbols.reexports.insert(name, (module, "*".to_string()));
+                    }
+                }
+                // export * from "./x"
+                None => symbols.stars.push(module),
+            },
         }
         return;
     }
@@ -175,27 +182,41 @@ fn read_export(statement: Node, source: &[u8], symbols: &mut FileSymbols) {
         return;
     }
     if let Some(declaration) = statement.child_by_field_name("declaration") {
-        let names = declared_names(declaration, source);
+        let declaration = unwrap_ambient(declaration);
+        let mut names = declared_names(declaration, source);
         if is_default {
-            let local = names
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "default".to_string());
-            symbols.defined.insert("default".to_string(), local);
+            // 이름 없는 `export default function () {}`는 지역 이름도 `default`로 둔다.
+            if names.is_empty() {
+                names.push("default".to_string());
+            }
+            symbols
+                .defined
+                .insert("default".to_string(), names[0].clone());
         } else {
             for name in &names {
                 symbols.defined.insert(name.clone(), name.clone());
             }
         }
-        record_members(declaration, source, symbols);
-        record_uses(declaration, source, &names, symbols);
-        // 이름 없는 `export default function () {}`
-        if names.is_empty() && is_default {
-            record_uses(declaration, source, &["default".to_string()], symbols);
+        if let Some(class) = names.first() {
+            record_members(declaration, source, class, symbols);
         }
+        record_uses(declaration, source, &names, symbols);
         return;
     }
-    if let Some(value) = statement.child_by_field_name("value") {
+    // export default <식>, 그리고 TypeScript의 `export = <식>`도 기본 내보내기로 본다.
+    let value = statement.child_by_field_name("value").or_else(|| {
+        children
+            .iter()
+            .any(|child| child.kind() == "=")
+            .then(|| {
+                children
+                    .iter()
+                    .find(|child| child.is_named() && child.kind() != "decorator")
+                    .copied()
+            })
+            .flatten()
+    });
+    if let Some(value) = value {
         // export default <식>. 식이 지역 이름 하나면 그 선언을 `default`로도 내보낸다.
         if value.kind() == "identifier" {
             symbols
@@ -205,6 +226,8 @@ fn read_export(statement: Node, source: &[u8], symbols: &mut FileSymbols) {
             symbols
                 .defined
                 .insert("default".to_string(), "default".to_string());
+            // 이름 없는 `export default class {}`
+            record_members(value, source, "default", symbols);
             record_uses(value, source, &["default".to_string()], symbols);
         }
     }
@@ -225,54 +248,103 @@ fn export_specifiers(clause: Node, source: &[u8]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// 최상위 선언이 만드는 지역 이름. 함수, 클래스, 변수(여럿일 수 있음), 인터페이스, 타입, 열거형.
+/// `declare`로 감싼 선언은 안의 선언을 본다.
+fn unwrap_ambient(node: Node) -> Node {
+    if node.kind() != "ambient_declaration" {
+        return node;
+    }
+    let mut cursor = node.walk();
+    let inner = node.named_children(&mut cursor).next();
+    inner.unwrap_or(node)
+}
+
+/// 최상위 선언이 만드는 지역 이름. 함수, 클래스, 변수(구조 분해로 여럿일 수 있음), 인터페이스, 타입, 열거형, 네임스페이스.
 fn declared_names(declaration: Node, source: &[u8]) -> Vec<String> {
     match declaration.kind() {
         "function_declaration"
         | "generator_function_declaration"
+        | "function_signature"
         | "class_declaration"
         | "abstract_class_declaration"
         | "interface_declaration"
         | "type_alias_declaration"
-        | "enum_declaration" => declaration
+        | "enum_declaration"
+        | "internal_module"
+        | "module" => declaration
             .child_by_field_name("name")
+            .filter(|name| matches!(name.kind(), "identifier" | "type_identifier"))
             .map(|name| vec![text(name, source).to_string()])
             .unwrap_or_default(),
         "lexical_declaration" | "variable_declaration" => {
+            let mut names = Vec::new();
             let mut cursor = declaration.walk();
-            declaration
+            for declarator in declaration
                 .named_children(&mut cursor)
                 .filter(|child| child.kind() == "variable_declarator")
-                .filter_map(|child| child.child_by_field_name("name"))
-                .filter(|name| name.kind() == "identifier")
-                .map(|name| text(name, source).to_string())
-                .collect()
+            {
+                if let Some(pattern) = declarator.child_by_field_name("name") {
+                    pattern_names(pattern, source, &mut names);
+                }
+            }
+            names
         }
         _ => Vec::new(),
     }
 }
 
-fn record_members(declaration: Node, source: &[u8], symbols: &mut FileSymbols) {
+/// 변수 선언의 이름 자리(`{ a, b: [c] }` 같은 구조 분해 포함)가 만드는 지역 이름.
+fn pattern_names(pattern: Node, source: &[u8], names: &mut Vec<String>) {
+    match pattern.kind() {
+        "identifier" | "shorthand_property_identifier_pattern" => {
+            names.push(text(pattern, source).to_string());
+        }
+        "pair_pattern" => {
+            if let Some(value) = pattern.child_by_field_name("value") {
+                pattern_names(value, source, names);
+            }
+        }
+        "assignment_pattern" | "object_assignment_pattern" => {
+            if let Some(left) = pattern.child_by_field_name("left") {
+                pattern_names(left, source, names);
+            }
+        }
+        "object_pattern" | "array_pattern" | "rest_pattern" => {
+            let mut cursor = pattern.walk();
+            for child in pattern.named_children(&mut cursor) {
+                pattern_names(child, source, names);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// 클래스의 공개 메서드. `#private`, `private`, 계산된 이름(`[Symbol.iterator]`)은 뺀다.
+fn record_members(declaration: Node, source: &[u8], class: &str, symbols: &mut FileSymbols) {
     if !matches!(
         declaration.kind(),
-        "class_declaration" | "abstract_class_declaration"
+        "class_declaration" | "abstract_class_declaration" | "class"
     ) {
         return;
     }
-    let (Some(name), Some(body)) = (
-        declaration.child_by_field_name("name"),
-        declaration.child_by_field_name("body"),
-    ) else {
+    let Some(body) = declaration.child_by_field_name("body") else {
         return;
     };
-    let class = text(name, source);
     let mut cursor = body.walk();
     for member in body.named_children(&mut cursor) {
-        if matches!(
+        if !matches!(
             member.kind(),
             "method_definition" | "abstract_method_signature" | "method_signature"
-        ) && let Some(method) = member.child_by_field_name("name")
-        {
+        ) {
+            continue;
+        }
+        let Some(method) = member.child_by_field_name("name") else {
+            continue;
+        };
+        let mut inner = member.walk();
+        let private = member.named_children(&mut inner).any(|child| {
+            child.kind() == "accessibility_modifier" && text(child, source) == "private"
+        });
+        if method.kind() == "property_identifier" && !private {
             symbols
                 .members
                 .insert(format!("{class}.{}", text(method, source)));
@@ -283,18 +355,32 @@ fn record_members(declaration: Node, source: &[u8], symbols: &mut FileSymbols) {
 /// 선언 안에서 쓰인 이름을 그 선언의 이름(여럿이면 각각, 없으면 파일 수준)으로 모은다.
 /// 깊이 중첩된 코드에서 스택이 넘치지 않게 커서로 돈다.
 fn record_uses(node: Node, source: &[u8], owners: &[String], symbols: &mut FileSymbols) {
-    // 변수 선언이 여럿이면 선언자마다 따로 모은다.
-    if matches!(node.kind(), "lexical_declaration" | "variable_declaration") && owners.len() > 1 {
+    // 변수 선언은 선언자마다 따로 모은다. 구조 분해로 이름이 여럿이면 그 이름들이 모두 같은 것을 쓴다.
+    if matches!(node.kind(), "lexical_declaration" | "variable_declaration") {
         let mut cursor = node.walk();
         for declarator in node
             .named_children(&mut cursor)
             .filter(|child| child.kind() == "variable_declarator")
         {
-            let owner = declarator
-                .child_by_field_name("name")
-                .map(|name| text(name, source).to_string());
+            let mut names = Vec::new();
+            if let Some(pattern) = declarator.child_by_field_name("name") {
+                pattern_names(pattern, source, &mut names);
+            }
             let found = used_names(declarator, source);
-            symbols.uses.entry(owner).or_default().extend(found);
+            if names.is_empty() {
+                symbols
+                    .uses
+                    .entry(None)
+                    .or_default()
+                    .extend(found.iter().cloned());
+            }
+            for name in names {
+                symbols
+                    .uses
+                    .entry(Some(name))
+                    .or_default()
+                    .extend(found.iter().cloned());
+            }
         }
         return;
     }
@@ -364,13 +450,32 @@ pub fn link(
 ) -> Linked {
     let mut symbols = BTreeMap::new();
     for (file, info) in files {
-        for name in info.defined.keys().chain(info.members.iter()) {
+        for name in info.defined.keys() {
             symbols.insert(format!("{file}#{name}"), file.clone());
         }
         // 지역 선언을 다른 이름으로 내보낸 것도 이 파일의 심볼이다.
         for (exported, local) in &info.local_exports {
             if !info.imports.contains_key(local) {
                 symbols.insert(format!("{file}#{exported}"), file.clone());
+            }
+        }
+        // 멤버는 클래스를 어떤 이름으로든 내보냈을 때만 심볼이 된다. ID는 클래스의 지역 이름을 쓴다.
+        let exported: HashSet<&str> = info
+            .defined
+            .values()
+            .chain(
+                info.local_exports
+                    .values()
+                    .filter(|local| !info.imports.contains_key(*local)),
+            )
+            .map(String::as_str)
+            .collect();
+        for member in &info.members {
+            let class = member
+                .split_once('.')
+                .map_or(member.as_str(), |(class, _)| class);
+            if exported.contains(class) {
+                symbols.insert(format!("{file}#{member}"), file.clone());
             }
         }
     }
@@ -398,8 +503,21 @@ pub fn link(
                 let Some(target) = resolve(file, module) else {
                     continue;
                 };
-                let name = used.member.as_deref().unwrap_or(name);
-                if let Some(dst) = definition(files, resolve, &symbols, &target, name, 0)
+                let lookup = |file: &str, name: &str| {
+                    definition(files, resolve, &symbols, file, name, &mut HashSet::new())
+                };
+                // 이름 전체(`* as ns`, `export * as ns`)를 가져왔으면 `ns.member`의 멤버를 찾는다.
+                let dst = match (lookup(&target, name), used.member.as_deref()) {
+                    (Some(Definition::Symbol(id)), None) => Some(id),
+                    (Some(Definition::Namespace(namespace)), Some(member)) => {
+                        match lookup(&namespace, member) {
+                            Some(Definition::Symbol(id)) => Some(id),
+                            _ => None,
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(dst) = dst
                     && dst != src
                 {
                     edges.insert((src.clone(), dst));
@@ -410,39 +528,164 @@ pub fn link(
     Linked { symbols, edges }
 }
 
+/// 내보낸 이름이 닿는 곳: 심볼, 또는 파일의 이름 전체.
+enum Definition {
+    Symbol(String),
+    Namespace(String),
+}
+
 /// `file`이 `name`으로 내보내는 것의 정의. re-export와 `export *`를 따라간다.
+/// `export *`가 서로를 가리켜도 같은 (파일, 이름)은 한 번만 보므로 파일 수에 비례해 끝난다.
 fn definition(
     files: &BTreeMap<String, FileSymbols>,
     resolve: &dyn Fn(&str, &str) -> Option<String>,
     symbols: &BTreeMap<String, String>,
     file: &str,
     name: &str,
-    depth: usize,
-) -> Option<String> {
-    if depth > 16 {
+    visited: &mut HashSet<(String, String)>,
+) -> Option<Definition> {
+    if !visited.insert((file.to_string(), name.to_string())) {
         return None;
     }
     let info = files.get(file)?;
+    if name == "*" {
+        return Some(Definition::Namespace(file.to_string()));
+    }
     let id = format!("{file}#{name}");
     if symbols.contains_key(&id) {
-        return Some(id);
+        return Some(Definition::Symbol(id));
     }
     if let Some((module, original)) = info.reexports.get(name) {
         let target = resolve(file, module)?;
-        return definition(files, resolve, symbols, &target, original, depth + 1);
+        return definition(files, resolve, symbols, &target, original, visited);
     }
     // 가져온 이름을 그대로 다시 내보낸 것
     if let Some(local) = info.local_exports.get(name)
         && let Some((module, original)) = info.imports.get(local)
     {
         let target = resolve(file, module)?;
-        return definition(files, resolve, symbols, &target, original, depth + 1);
+        return definition(files, resolve, symbols, &target, original, visited);
     }
     if name == "default" {
         return None;
     }
     info.stars.iter().find_map(|module| {
         let target = resolve(file, module)?;
-        definition(files, resolve, symbols, &target, name, depth + 1)
+        definition(files, resolve, symbols, &target, name, visited)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tree_sitter::Parser;
+
+    fn parse(text: &str) -> FileSymbols {
+        let mut parser = Parser::new();
+        parser
+            .set_language(&tree_sitter_typescript::LANGUAGE_TYPESCRIPT.into())
+            .unwrap();
+        let tree = parser.parse(text, None).unwrap();
+        extract(tree.root_node(), text.as_bytes())
+    }
+
+    /// `./x`를 `x.ts`로 해석하는 레포를 이어 심볼과 의존을 만든다.
+    fn link_files(files: &[(&str, &str)]) -> Linked {
+        let files: BTreeMap<String, FileSymbols> = files
+            .iter()
+            .map(|(path, text)| (path.to_string(), parse(text)))
+            .collect();
+        let known: BTreeSet<String> = files.keys().cloned().collect();
+        let resolve = move |_: &str, module: &str| {
+            let path = format!("{}.ts", module.trim_start_matches("./"));
+            known.contains(&path).then_some(path)
+        };
+        link(&files, &resolve)
+    }
+
+    fn ids(linked: &Linked) -> Vec<&str> {
+        linked.symbols.keys().map(String::as_str).collect()
+    }
+
+    #[test]
+    fn 구조_분해와_declare와_네임스페이스와_export_등호를_심볼로_만든다() {
+        let linked = link_files(&[(
+            "a.ts",
+            "export const { da, db: [dc] } = obj;\nexport declare function df(): void;\nexport namespace NS { export const x = 1; }\nexport module Mod {}\nfunction f() {}\nexport = f;\n",
+        )]);
+        assert_eq!(
+            ids(&linked),
+            [
+                "a.ts#Mod",
+                "a.ts#NS",
+                "a.ts#da",
+                "a.ts#dc",
+                "a.ts#default",
+                "a.ts#df"
+            ]
+        );
+    }
+
+    #[test]
+    fn 나중에_내보낸_클래스와_이름_없는_기본_클래스의_공개_메서드만_멤버가_된다() {
+        let linked = link_files(&[
+            (
+                "late.ts",
+                "class Late { m() {} #hidden() {} private secret() {} [Symbol.iterator]() {} }\nclass Inner { n() {} }\nexport { Late };\n",
+            ),
+            ("anon.ts", "export default class { send() {} }\n"),
+        ]);
+        assert_eq!(
+            ids(&linked),
+            [
+                "anon.ts#default",
+                "anon.ts#default.send",
+                "late.ts#Late",
+                "late.ts#Late.m"
+            ]
+        );
+    }
+
+    #[test]
+    fn export_star_as로_내보낸_이름_전체의_멤버를_찾는다() {
+        let linked = link_files(&[
+            ("money.ts", "export function round() {}\n"),
+            ("barrel.ts", "export * as money from './money';\n"),
+            (
+                "use.ts",
+                "import { money } from './barrel';\nexport const total = money.round();\n",
+            ),
+        ]);
+        assert_eq!(
+            linked.edges,
+            BTreeSet::from([("use.ts#total".to_string(), "money.ts#round".to_string())])
+        );
+    }
+
+    #[test]
+    fn export_star가_서로를_가리켜도_없는_이름을_빨리_포기한다() {
+        // 배럴 여섯 개가 서로를 모두 export *로 내보낸다. 경로마다 따라가면 끝나지 않는다.
+        let names: Vec<String> = (0..6).map(|i| format!("b{i}")).collect();
+        let texts: Vec<(String, String)> = names
+            .iter()
+            .map(|name| {
+                let text: String = names
+                    .iter()
+                    .filter(|other| *other != name)
+                    .map(|other| format!("export * from './{other}';\n"))
+                    .collect();
+                (format!("{name}.ts"), text)
+            })
+            .chain([(
+                "use.ts".to_string(),
+                "import { nope } from './b0';\nexport const x = nope;\n".to_string(),
+            )])
+            .collect();
+        let files: Vec<(&str, &str)> = texts
+            .iter()
+            .map(|(path, text)| (path.as_str(), text.as_str()))
+            .collect();
+        let linked = link_files(&files);
+        assert!(linked.edges.is_empty());
+    }
 }

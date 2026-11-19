@@ -248,7 +248,11 @@ pub fn add_analysis(graph: &mut Graph, root: &Path, analysis: &crate::analysis::
     }
     graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
     for (id, file) in &analysis.symbols {
-        let (_, name) = id.split_once('#').unwrap_or((file, id));
+        // 파일 경로에도 `#`이 들어갈 수 있으니 파일 경로를 떼어 낸 나머지가 이름이다.
+        let name = id
+            .strip_prefix(file.as_str())
+            .and_then(|rest| rest.strip_prefix('#'))
+            .unwrap_or(id);
         graph.nodes.push(Node {
             id: id.clone(),
             kind: "symbol",
