@@ -115,9 +115,18 @@
 
 ### 5. 릴리스
 
-- [ ] 버전을 올려 릴리스하고, 블로그에 다시 설치합니다. 블로그 설정에는 이미 `analysis`가 있어 이 설치로 분석이 켜집니다.
+- [x] 버전을 올려 릴리스하고, 블로그에 다시 설치합니다. 블로그 설정에는 이미 `analysis`가 있어 이 설치로 분석이 켜집니다.
 
 완료 기준: 블로그에서 `lore build`의 `analysis`에 파싱하지 못한 파일이 없고, `lore impact features/common/components/Tag.tsx`가 `note`를 선언 근거와 추론 근거로 함께 냅니다.
+
+확인: 0.3.0을 릴리스(#45, `v0.3.0`)하고 블로그에 다시 설치했습니다(블로그 #42). 릴리스 바이너리로 블로그에서 다음을 확인했습니다.
+
+- `lore build`: 파일 37개, 파일 의존 30개, 해석하지 못한 import 0개, 심볼 37개, 심볼 의존 32개
+- `lore impact features/common/components/Tag.tsx`가 `note`를 1홉 선언(`note 의존함 common`)과 1홉 추론(`TagFilter.tsx#TagFilter 의존함 Tag.tsx#Tag`)으로 함께 냅니다.
+- 완료 기준의 "파싱하지 못한 파일이 없음"은 글자 그대로는 채우지 못했습니다. `parse_errors`에 두 파일(`features/note/components/NoteList.tsx`, `features/note/lib/notes.test.ts`)이 남습니다.
+  - 1번에서 적은 문법 크레이트의 한계(JSX 글 속의 맨 `&`, 타입 위치의 `typeof import(...)`)입니다.
+  - 두 파일 모두 읽기는 했고, 오류 밖의 import와 심볼은 그대로 씁니다. 그래서 의존과 심볼에 빠진 것은 없습니다.
+  - 문법 크레이트가 고쳐지면 다시 봅니다.
 
 ### 6. 심볼을 받는 `lore why` (#20의 답에 따라)
 
