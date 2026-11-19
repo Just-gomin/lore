@@ -3,7 +3,7 @@
 //! 명령의 인자가 바뀌면 이 테스트가 실패해, 스킬도 같은 PR에서 고치게 한다.
 
 use lore::cli::{self, Invocation};
-use lore::install::{AGENTS_BODY, SKILLS};
+use lore::install::{AGENTS_BODY, INIT_SKILLS, SKILLS};
 
 /// 마크다운에서 `lang` 코드블록의 내용을 모은다.
 fn code_blocks(text: &str, lang: &str) -> Vec<String> {
@@ -92,7 +92,7 @@ fn sh_commands(text: &str) -> Vec<Vec<String>> {
 
 #[test]
 fn 스킬과_안내문의_lore_명령은_구현된_명령으로_해석된다() {
-    let mut texts: Vec<(&str, &str)> = SKILLS.to_vec();
+    let mut texts: Vec<(&str, &str)> = SKILLS.iter().chain(&INIT_SKILLS).copied().collect();
     texts.push(("AGENTS.md 구간", AGENTS_BODY));
     let mut checked = 0;
     for (name, text) in texts {
@@ -122,7 +122,7 @@ fn 소스_노트_스킬의_입력_예시는_입력_검사를_통과한다() {
 fn 설치하는_마크다운의_중첩_목록은_두_칸_들여쓰기다() {
     // 설치한 레포의 포매터(prettier 등)가 들여쓰기를 바꾸면 스킬 해시가 어긋나
     // 사람이 고친 스킬로 보이게 된다. prettier의 기본 형식인 두 칸으로 쓴다.
-    let mut texts: Vec<(&str, &str)> = SKILLS.to_vec();
+    let mut texts: Vec<(&str, &str)> = SKILLS.iter().chain(&INIT_SKILLS).copied().collect();
     texts.push(("AGENTS.md 구간", AGENTS_BODY));
     for (name, text) in texts {
         let mut in_code = false;

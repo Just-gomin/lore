@@ -264,3 +264,57 @@ fn 예전_버전이_설치하고_고치지_않은_워크플로는_새_버전으�
         lore::install::installed_workflow()
     );
 }
+
+#[test]
+fn init을_주면_lore_init_스킬을_설치하고_판단이_드는_검사를_꺼_둔다() {
+    let dir = empty_repo();
+    let report = json(&lore_in(dir.path(), &["install", "--init"]));
+    for name in ["lore-init-channels", "lore-init-collect", "lore-init-draft"] {
+        let path = format!(".claude/skills/{name}/SKILL.md");
+        assert!(
+            changes(&report).contains(&(path.clone(), "created".to_string())),
+            "{path}"
+        );
+    }
+    let config = read(dir.path(), "lore.config.yaml");
+    assert!(config.contains("\n  scope: []\n"), "{config}");
+
+    // --init 없이 설치하면 init 스킬도 check.scope도 없다.
+    let plain = empty_repo();
+    assert!(lore_in(plain.path(), &["install"]).status.success());
+    assert!(!plain.path().join(".claude/skills/lore-init-draft").exists());
+    assert!(!read(plain.path(), "lore.config.yaml").contains("scope:"));
+
+    // 걷어내면 init 스킬도 지운다.
+    let report = json(&lore_in(dir.path(), &["uninstall"]));
+    assert!(changes(&report).contains(&(
+        ".claude/skills/lore-init-draft/SKILL.md".to_string(),
+        "removed".to_string()
+    )));
+    assert!(!dir.path().join(".claude").exists());
+}
+
+#[test]
+fn no_skills면_init_스킬도_설치하지_않고_다시_설치하면_있던_init_스킬을_갱신한다() {
+    let dir = empty_repo();
+    let report = json(&lore_in(dir.path(), &["install", "--init", "--no-skills"]));
+    assert!(
+        changes(&report)
+            .iter()
+            .all(|(path, _)| !path.starts_with(".claude/"))
+    );
+    // 설정의 check.scope는 --init이 정하므로 그대로 들어간다.
+    assert!(read(dir.path(), "lore.config.yaml").contains("\n  scope: []\n"));
+
+    let dir = empty_repo();
+    assert!(lore_in(dir.path(), &["install", "--init"]).status.success());
+    let path = ".claude/skills/lore-init-draft/SKILL.md";
+    let old = lore::install::installed_skill(
+        "---\nname: lore-init-draft\ndescription: 옛 설명\n---\n\n옛 본문\n",
+    );
+    std::fs::write(dir.path().join(path), old).unwrap();
+    // --init 없이 다시 설치해도 있던 init 스킬은 새 버전으로 바꾼다.
+    let report = json(&lore_in(dir.path(), &["install"]));
+    assert!(changes(&report).contains(&(path.to_string(), "updated".to_string())));
+    assert!(read(dir.path(), path).contains("# lore 도입 3단계"));
+}

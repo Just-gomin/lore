@@ -40,6 +40,22 @@ pub const SKILLS: [(&str, &str); 3] = [
         include_str!("../templates/skills/lore-sync.md"),
     ),
 ];
+
+/// 기존 프로젝트에 lore를 들일 때만 쓰는 `lore init`의 세 스킬. `lore install --init`으로 설치한다.
+pub const INIT_SKILLS: [(&str, &str); 3] = [
+    (
+        "lore-init-channels",
+        include_str!("../templates/skills/lore-init-channels.md"),
+    ),
+    (
+        "lore-init-collect",
+        include_str!("../templates/skills/lore-init-collect.md"),
+    ),
+    (
+        "lore-init-draft",
+        include_str!("../templates/skills/lore-init-draft.md"),
+    ),
+];
 /// 스킬을 두는 폴더. Claude Code의 프로젝트 스킬 위치다.
 pub const SKILL_DIR: &str = ".claude/skills";
 const HASH_KEY: &str = "metadata:\n  lore-hash: ";
@@ -114,6 +130,8 @@ pub fn project_root(cwd: &Path) -> Result<PathBuf, LoreError> {
 pub struct Parts {
     pub skills: bool,
     pub ci: bool,
+    /// `--init`: `lore init` 스킬을 설치하고, 새로 만드는 설정에 `check.scope: []`를 넣는다.
+    pub init: bool,
 }
 
 pub fn install(cwd: &Path, dry_run: bool, parts: Parts) -> Result<InstallReport, LoreError> {
@@ -125,7 +143,12 @@ pub fn install(cwd: &Path, dry_run: bool, parts: Parts) -> Result<InstallReport,
         plan.record(CONFIG_FILE, Change::Unchanged);
         config::load(&root)?.docs
     } else {
-        plan.write(CONFIG_FILE, None, DEFAULT_CONFIG)?;
+        let text = if parts.init {
+            init_config()
+        } else {
+            DEFAULT_CONFIG.to_string()
+        };
+        plan.write(CONFIG_FILE, None, &text)?;
         "docs".to_string()
     };
 
@@ -149,17 +172,24 @@ pub fn install(cwd: &Path, dry_run: bool, parts: Parts) -> Result<InstallReport,
         }
     }
 
+    // `--no-skills`면 init 스킬도 설치하지 않습니다. init 스킬이 lore-source, lore-record 스킬을 쓰기 때문입니다.
+    // `--init` 없이 다시 설치해도 이미 있는 init 스킬은 새 버전으로 바꿉니다.
+    let mut skills: Vec<(&str, &str)> = Vec::new();
     if parts.skills {
-        for (name, template) in SKILLS {
-            let path = skill_path(name);
-            let text = installed_skill(template);
-            match plan.read(&path)? {
-                // 사람이 고친 스킬은 덮어쓰지 않는다.
-                Some(old) if old != text && !skill_untouched(&old) => {
-                    plan.record(&path, Change::Kept)
-                }
-                old => plan.write(&path, old.as_deref(), &text)?,
+        skills.extend(SKILLS);
+        for (name, template) in INIT_SKILLS {
+            if parts.init || root.join(skill_path(name)).exists() {
+                skills.push((name, template));
             }
+        }
+    }
+    for (name, template) in skills {
+        let path = skill_path(name);
+        let text = installed_skill(template);
+        match plan.read(&path)? {
+            // 사람이 고친 스킬은 덮어쓰지 않는다.
+            Some(old) if old != text && !skill_untouched(&old) => plan.record(&path, Change::Kept),
+            old => plan.write(&path, old.as_deref(), &text)?,
         }
     }
 
@@ -183,7 +213,12 @@ pub fn installed_files() -> Vec<String> {
         .chain(TOOL_FILES)
         .map(str::to_string)
         .collect();
-    files.extend(SKILLS.iter().map(|(name, _)| skill_path(name)));
+    files.extend(
+        SKILLS
+            .iter()
+            .chain(&INIT_SKILLS)
+            .map(|(name, _)| skill_path(name)),
+    );
     files.push(WORKFLOW_FILE.to_string());
     files
 }
@@ -207,6 +242,20 @@ pub fn workflow_untouched(text: &str) -> bool {
         return false;
     };
     sha256_hex(body.as_bytes()) == recorded
+}
+
+/// `lore install --init`이 새로 만드는 설정. `lore init`을 마치기 전에는 판단이 드는 검사가 아무 파일도 보지 않는다.
+fn init_config() -> String {
+    let marker = "  ignore: []\n";
+    assert!(
+        DEFAULT_CONFIG.contains(marker),
+        "기본 설정에 check.ignore가 있다"
+    );
+    DEFAULT_CONFIG.replacen(
+        marker,
+        "  ignore: []\n  # 판단이 드는 검사를 켤 범위. lore init을 마친 모듈부터 server/**처럼 폴더 글롭으로 더합니다.\n  scope: []\n",
+        1,
+    )
 }
 
 pub fn skill_path(name: &str) -> String {
@@ -420,7 +469,7 @@ pub fn uninstall(cwd: &Path, dry_run: bool, with_config: bool) -> Result<Install
         }
     }
 
-    for (name, _) in SKILLS {
+    for (name, _) in SKILLS.iter().chain(&INIT_SKILLS) {
         let path = skill_path(name);
         if let Some(text) = plan.read(&path)? {
             if skill_untouched(&text) {
