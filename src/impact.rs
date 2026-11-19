@@ -6,7 +6,7 @@
 //! 정적 분석이 만든 의존(추론)도 기능 하나를 건너는 길로 센다. 파일 X를 기능 B의 파일이
 //! 스펙에 속하지 않은 파일을 몇 번 거치든 import하면, B는 X가 속한 기능에서 한 홉이다.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -84,9 +84,23 @@ impl Item {
         }
     }
 
-    /// 더 짧은 길이 앞선다. 길이가 같으면 경로를 글자 순으로 비교해 결과를 하나로 정한다.
-    fn key(&self) -> (u32, usize, &Vec<Step>) {
-        (self.hop, self.path.len(), &self.path)
+    /// 더 짧은 길이 앞선다. 홉이 같으면 선언 근거가 앞서고, 길이도 같으면 경로를 글자 순으로 비교해 결과를 하나로 정한다.
+    fn key(&self) -> (u32, bool, usize, &Vec<Step>) {
+        (
+            self.hop,
+            self.evidence != "declared",
+            self.path.len(),
+            &self.path,
+        )
+    }
+
+    /// 이 길이 이미 `id`를 지났는지.
+    fn passes(&self, id: &str) -> bool {
+        self.id == id
+            || self
+                .path
+                .iter()
+                .any(|step| step.src == id || step.dst == id)
     }
 }
 
@@ -114,6 +128,13 @@ pub fn impact(
     // 분석 엣지는 모두 의존함이라 `--edges`에서 의존함을 빼면 함께 빠진다.
     let analysis = edges.contains(&EdgeKind::DependsOn);
 
+    let graph = if analysis {
+        AnalysisGraph::load(&conn)?
+    } else {
+        AnalysisGraph::default()
+    };
+    let mut walks: HashMap<String, Walked> = HashMap::new();
+
     let seeds = seeds(&conn, &id, &kind)?;
     let seed_ids: BTreeSet<String> = seeds.iter().map(|item| item.id.clone()).collect();
     let mut features: BTreeMap<(String, &'static str), Item> = BTreeMap::new();
@@ -126,60 +147,89 @@ pub fn impact(
         let lead = seed.path.len();
         let seed = Item::new(seed.id.clone(), 0, seed.path.clone(), lead);
         keep_shortest_feature(&mut features, seed.clone());
-        let sources = if from_target {
-            Vec::new()
-        } else {
-            feature_files(&conn, &seed)?
-        };
         frontier.push(Expansion {
             feature: Some(seed),
-            sources,
+            walk_from_files: !from_target,
         });
     }
-    if from_target {
-        frontier.push(Expansion {
-            feature: None,
-            sources: vec![(id.clone(), Vec::new())],
-        });
-    }
+    // 파일과 심볼은 분석 엣지를 대상 자신에서 출발한다. 스펙에 속하지 않은 대상이면 이 길만 있다.
+    let target_walk = (analysis && from_target).then(|| walk(&graph, &[(id.clone(), None)]));
 
     for level in 0..hop {
+        if frontier.is_empty() && (level > 0 || target_walk.is_none()) {
+            break;
+        }
         let mut reached: BTreeMap<(String, &'static str), Item> = BTreeMap::new();
-        for expansion in &frontier {
-            if let Some(feature) = &expansion.feature {
-                for step in declared(&conn, &feature.id, &edges)? {
-                    let mut path = feature.path.clone();
-                    let src = step.src.clone();
-                    path.push(step);
-                    keep_shortest_feature(
-                        &mut reached,
-                        Item::new(src, level + 1, path, feature.lead),
-                    );
-                }
+        let offer = |reached: &mut BTreeMap<_, _>, from: Option<&Item>, item: Item| {
+            // 대상이 직접 닿는 기능과, 이 길이 이미 지난 기능으로는 돌아오지 않는다.
+            if seed_ids.contains(&item.id) || from.is_some_and(|from| from.passes(&item.id)) {
+                return;
             }
-            if analysis && !expansion.sources.is_empty() {
-                let lead = expansion.feature.as_ref().map_or(0, |feature| feature.lead);
-                let walked = walk(&conn, &expansion.sources, &seed_ids)?;
-                for (feature, path) in walked.features {
-                    keep_shortest_feature(&mut reached, Item::new(feature, level + 1, path, lead));
-                }
-                for (file, path, owned) in walked.files {
-                    let hop = if owned { level + 1 } else { level };
-                    keep_shortest(&mut files, Item::new(file, hop, path, lead));
-                }
+            keep_shortest_feature(reached, item);
+        };
+        if level == 0
+            && let Some(walked) = &target_walk
+        {
+            for (feature, trail) in &walked.features {
+                let path = walked.path(&[], *trail);
+                offer(&mut reached, None, Item::new(feature.clone(), 1, path, 0));
+            }
+            for (file, trail) in &walked.files {
+                offer_file(&mut files, walked, &[], file, 0, *trail, 0);
+            }
+        }
+        for expansion in &frontier {
+            let Some(feature) = &expansion.feature else {
+                continue;
+            };
+            for step in declared(&conn, &feature.id, &edges)? {
+                let mut path = feature.path.clone();
+                let src = step.src.clone();
+                path.push(step);
+                offer(
+                    &mut reached,
+                    Some(feature),
+                    Item::new(src, level + 1, path, feature.lead),
+                );
+            }
+            if !analysis || !expansion.walk_from_files {
+                continue;
+            }
+            // 기능에서의 분석 길은 근거나 앞의 길과 상관없이 같으므로 한 번만 걷는다.
+            if !walks.contains_key(&feature.id) {
+                let sources = feature_files(&conn, &feature.id)?;
+                walks.insert(feature.id.clone(), walk(&graph, &sources));
+            }
+            let walked = &walks[&feature.id];
+            for (id, trail) in &walked.features {
+                let path = walked.path(&feature.path, *trail);
+                offer(
+                    &mut reached,
+                    Some(feature),
+                    Item::new(id.clone(), level + 1, path, feature.lead),
+                );
+            }
+            for (file, trail) in &walked.files {
+                offer_file(
+                    &mut files,
+                    walked,
+                    &feature.path,
+                    file,
+                    level,
+                    *trail,
+                    feature.lead,
+                );
             }
         }
         frontier = Vec::new();
         for (key, item) in reached {
-            // 대상이 직접 닿는 기능에는 다른 길로 돌아오지 않는다.
-            if features.contains_key(&key) || seed_ids.contains(&key.0) {
+            if features.contains_key(&key) {
                 continue;
             }
             features.insert(key, item.clone());
-            let sources = feature_files(&conn, &item)?;
             frontier.push(Expansion {
                 feature: Some(item),
-                sources,
+                walk_from_files: true,
             });
         }
     }
@@ -189,7 +239,10 @@ pub fn impact(
             for step in incoming(&conn, &feature.id, edge)? {
                 let mut path = feature.path.clone();
                 let src = step.src.clone();
-                path.push(step);
+                // 분석 길로 닿은 기능은 이미 그 파일의 엣지로 끝난다.
+                if path.last() != Some(&step) {
+                    path.push(step);
+                }
                 keep_shortest(found, Item::new(src, feature.hop, path, feature.lead));
             }
         }
@@ -334,12 +387,11 @@ fn seeds(conn: &Connection, id: &str, kind: &str) -> Result<Vec<Item>, LoreError
     }
 }
 
-/// 한 기능(또는 대상)에서 다음 홉으로 펼칠 거리.
+/// 한 기능에서 다음 홉으로 펼칠 거리.
 struct Expansion {
-    /// 선언 엣지를 따라갈 기능. 스펙에 속하지 않은 파일이 대상이면 없다.
     feature: Option<Item>,
-    /// 분석 엣지를 거꾸로 따라갈 출발 노드와 거기까지 온 길.
-    sources: Vec<(String, Vec<Step>)>,
+    /// 기능의 파일들에서 분석 엣지를 따라갈지. 대상이 파일이나 심볼이면 홉 0의 기능은 대상에서만 출발한다.
+    walk_from_files: bool,
 }
 
 /// 같은 기능이라도 근거가 다르면 따로 남긴다. 근거마다 가장 짧은 길 하나다.
@@ -366,101 +418,185 @@ fn declared(conn: &Connection, feature: &str, edges: &[EdgeKind]) -> Result<Vec<
     Ok(steps)
 }
 
-/// 기능의 파일들. 분석 엣지를 따라갈 출발점이 된다.
-fn feature_files(conn: &Connection, feature: &Item) -> Result<Vec<(String, Vec<Step>)>, LoreError> {
+/// 기능의 파일들. 분석 엣지를 따라갈 출발점이 되고, 길은 그 파일이 기능을 구현하거나 검증하는 엣지로 시작한다.
+fn feature_files(
+    conn: &Connection,
+    feature: &str,
+) -> Result<Vec<(String, Option<Step>)>, LoreError> {
     let mut sources = Vec::new();
     for kind in [EdgeKind::Implements, EdgeKind::Verifies] {
-        for step in incoming(conn, &feature.id, kind)? {
-            let mut path = feature.path.clone();
-            let src = step.src.clone();
-            path.push(step);
-            sources.push((src, path));
+        for step in incoming(conn, feature, kind)? {
+            sources.push((step.src.clone(), Some(step)));
         }
     }
     Ok(sources)
 }
 
-/// 분석 엣지로 닿은 것들.
+/// 정적 분석의 엣지와 파일이 속한 기능. 조회 한 번에 한 번만 읽는다.
+#[derive(Default)]
+struct AnalysisGraph {
+    /// 노드 → 그 노드에 의존하는 분석 엣지
+    dependents: HashMap<String, Vec<Step>>,
+    /// 파일 → 그 파일에 속한 심볼의 속함 엣지
+    symbols: HashMap<String, Vec<Step>>,
+    /// 심볼 → 담은 파일로 가는 속함 엣지
+    container: HashMap<String, Step>,
+    /// 파일 → 그 파일이 구현하거나 검증하는 기능으로 가는 엣지
+    owners: HashMap<String, Vec<Step>>,
+}
+
+impl AnalysisGraph {
+    fn load(conn: &Connection) -> Result<AnalysisGraph, LoreError> {
+        let mut graph = AnalysisGraph::default();
+        let mut stmt = conn
+            .prepare(
+                "SELECT src, dst, kind, origin FROM edges
+                 WHERE (origin = ?1 AND kind IN ('depends_on', 'belongs_to'))
+                    OR (origin = ?2 AND kind IN ('implements', 'verifies'))
+                 ORDER BY kind, src, dst",
+            )
+            .map_err(database_error)?;
+        let rows = stmt
+            .query_map([ORIGIN_ANALYSIS, ORIGIN_FRONTMATTER], step)
+            .map_err(database_error)?;
+        for row in rows {
+            let step = row.map_err(database_error)?;
+            match step.kind {
+                EdgeKind::DependsOn => graph
+                    .dependents
+                    .entry(step.dst.clone())
+                    .or_default()
+                    .push(step),
+                EdgeKind::BelongsTo => {
+                    graph
+                        .symbols
+                        .entry(step.dst.clone())
+                        .or_default()
+                        .push(step.clone());
+                    graph.container.insert(step.src.clone(), step);
+                }
+                _ => graph.owners.entry(step.src.clone()).or_default().push(step),
+            }
+        }
+        Ok(graph)
+    }
+}
+
+/// 분석 엣지로 닿은 것들. 길은 출발 노드의 길에 이어진다.
+///
+/// 긴 import 사슬에서 노드마다 길을 복사하지 않도록, 엣지를 앞 엣지를 가리키는 목록에 두고 필요할 때만 길로 푼다.
+#[derive(Default)]
 struct Walked {
-    /// 닿은 기능과 길. 길의 끝은 그 기능의 파일이 기능을 구현하거나 검증하는 엣지다.
-    features: Vec<(String, Vec<Step>)>,
-    /// 닿은 파일, 길, 스펙에 속했는지.
-    files: Vec<(String, Vec<Step>, bool)>,
+    /// 엣지와 그 앞 엣지의 자리
+    steps: Vec<(Step, Option<usize>)>,
+    /// 닿은 기능과 길의 끝. 길의 끝은 그 기능의 파일이 기능을 구현하거나 검증하는 엣지다.
+    features: Vec<(String, Trail)>,
+    /// 지나간 스펙 밖 파일과 길의 끝. 스펙에 속한 파일은 기능에 붙여 따로 모은다.
+    files: Vec<(String, Trail)>,
+}
+
+/// 길의 끝 엣지 자리와 길이.
+#[derive(Clone, Copy)]
+struct Trail {
+    end: Option<usize>,
+    len: usize,
+}
+
+impl Walked {
+    fn push(&mut self, step: Step, before: Trail) -> Trail {
+        self.steps.push((step, before.end));
+        Trail {
+            end: Some(self.steps.len() - 1),
+            len: before.len + 1,
+        }
+    }
+
+    /// `prefix` 뒤에 길을 잇는다.
+    fn path(&self, prefix: &[Step], trail: Trail) -> Vec<Step> {
+        let mut rest = Vec::with_capacity(trail.len);
+        let mut at = trail.end;
+        while let Some(index) = at {
+            let (step, before) = &self.steps[index];
+            rest.push(step.clone());
+            at = *before;
+        }
+        let mut path = prefix.to_vec();
+        path.extend(rest.into_iter().rev());
+        path
+    }
 }
 
 /// 출발 노드들에 의존하는 파일과 심볼을 분석 엣지로 거꾸로 따라간다.
 ///
 /// 스펙에 속한 파일에 닿으면 그 기능을 내고 거기서 멈춘다. 스펙에 속하지 않은 파일과 심볼은 계속 건넌다.
 /// 파일에서는 그 파일의 심볼에 의존하는 것도 따라간다. 심볼 의존은 re-export를 거쳐 정의에 닿아 있어서,
-/// 폴더의 `index.ts`를 거쳐 가져간 파일도 찾는다.
-/// `skip`의 기능(대상이 직접 닿는 기능)은 내지 않는다. 같은 노드는 한 번만 지나 순환이 있어도 끝난다.
-fn walk(
-    conn: &Connection,
-    sources: &[(String, Vec<Step>)],
-    skip: &BTreeSet<String>,
-) -> Result<Walked, LoreError> {
-    let mut walked = Walked {
-        features: Vec::new(),
-        files: Vec::new(),
-    };
-    let mut seen: BTreeSet<String> = sources.iter().map(|(id, _)| id.clone()).collect();
-    let mut queue: VecDeque<(String, Vec<Step>)> = sources.iter().cloned().collect();
-    while let Some((node, path)) = queue.pop_front() {
-        for belongs in incoming(conn, &node, EdgeKind::BelongsTo)?
-            .into_iter()
-            .filter(|step| step.origin == ORIGIN_ANALYSIS)
-        {
-            if seen.insert(belongs.src.clone()) {
-                let mut path = path.clone();
-                let symbol = belongs.src.clone();
-                path.push(belongs);
-                queue.push_back((symbol, path));
+/// 폴더의 `index.ts`를 거쳐 가져간 파일도 찾는다. 같은 노드는 한 번만 지나 순환이 있어도 끝난다.
+fn walk(graph: &AnalysisGraph, sources: &[(String, Option<Step>)]) -> Walked {
+    let mut walked = Walked::default();
+    let mut seen: BTreeSet<&str> = sources.iter().map(|(id, _)| id.as_str()).collect();
+    let mut queue: VecDeque<(&str, Trail)> = VecDeque::new();
+    for (id, first) in sources {
+        let empty = Trail { end: None, len: 0 };
+        let trail = match first {
+            Some(step) => walked.push(step.clone(), empty),
+            None => empty,
+        };
+        queue.push_back((id, trail));
+    }
+    while let Some((node, trail)) = queue.pop_front() {
+        for belongs in graph.symbols.get(node).into_iter().flatten() {
+            if seen.insert(&belongs.src) {
+                let trail = walked.push(belongs.clone(), trail);
+                queue.push_back((&belongs.src, trail));
             }
         }
-        let steps = incoming(conn, &node, EdgeKind::DependsOn)?;
-        for step in steps
-            .into_iter()
-            .filter(|step| step.origin == ORIGIN_ANALYSIS)
-        {
-            if !seen.insert(step.src.clone()) {
+        for step in graph.dependents.get(node).into_iter().flatten() {
+            if !seen.insert(&step.src) {
                 continue;
             }
-            let src = step.src.clone();
-            let mut path = path.clone();
-            path.push(step);
+            let trail = walked.push(step.clone(), trail);
             // 심볼은 담은 파일로 기능을 찾는다.
-            let mut to_file = path.clone();
-            let file = match outgoing(conn, &src, &[EdgeKind::BelongsTo])?
-                .into_iter()
-                .find(|step| step.origin == ORIGIN_ANALYSIS)
-            {
-                Some(belongs) => {
-                    let file = belongs.dst.clone();
-                    to_file.push(belongs);
-                    file
-                }
-                None => src.clone(),
+            let (file, to_file) = match graph.container.get(&step.src) {
+                Some(belongs) => (belongs.dst.as_str(), walked.push(belongs.clone(), trail)),
+                None => (step.src.as_str(), trail),
             };
-            let owners = outgoing(conn, &file, &[EdgeKind::Implements, EdgeKind::Verifies])?;
-            walked
-                .files
-                .push((file, to_file.clone(), !owners.is_empty()));
-            if owners.is_empty() {
-                queue.push_back((src, path));
-                continue;
-            }
-            for owner in owners {
-                if skip.contains(&owner.dst) {
-                    continue;
+            match graph.owners.get(file) {
+                None => {
+                    walked.files.push((file.to_string(), to_file));
+                    queue.push_back((&step.src, trail));
                 }
-                let mut path = to_file.clone();
-                let feature = owner.dst.clone();
-                path.push(owner);
-                walked.features.push((feature, path));
+                Some(owners) => {
+                    for owner in owners {
+                        let end = walked.push(owner.clone(), to_file);
+                        walked.features.push((owner.dst.clone(), end));
+                    }
+                }
             }
         }
     }
-    Ok(walked)
+    walked
+}
+
+/// 분석 엣지로 지나간 파일을 영향받는 파일에 넣는다. 이미 더 짧은 길이 있으면 길을 풀지 않는다.
+fn offer_file(
+    files: &mut BTreeMap<String, Item>,
+    walked: &Walked,
+    prefix: &[Step],
+    file: &str,
+    hop: u32,
+    trail: Trail,
+    lead: usize,
+) {
+    // 분석 엣지로 닿은 파일의 길은 늘 추론이다.
+    let len = prefix.len() + trail.len;
+    if let Some(old) = files.get(file) {
+        let (old_hop, old_inferred, old_len, _) = old.key();
+        if (old_hop, old_inferred, old_len) < (hop, true, len) {
+            return;
+        }
+    }
+    let path = walked.path(prefix, trail);
+    keep_shortest(files, Item::new(file.to_string(), hop, path, lead));
 }
 
 /// 다른 결정이 대체한 결정의 ID.

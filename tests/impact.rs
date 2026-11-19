@@ -388,3 +388,97 @@ fn 한_기능에_선언과_추론_경로가_둘_다_있으면_둘_다_낸다() {
         ]
     );
 }
+
+#[test]
+fn 홉이_같으면_파일과_결정은_선언_근거의_길을_따른다() {
+    let dir = repo("analysis");
+    let spec = dir.path().join("docs/specs/payment-notification.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace("depends_on: []", "depends_on:\n  - payment-core"),
+    )
+    .unwrap();
+    let report = json(&lore_in(
+        dir.path(),
+        &["impact", "services/payment/core/types.ts"],
+    ));
+    let files = report["files"].as_array().unwrap();
+    let alert = files
+        .iter()
+        .find(|item| item["id"] == "services/notification/alert.ts")
+        .unwrap();
+    assert_eq!(alert["hop"], 1);
+    assert_eq!(alert["evidence"], "declared");
+}
+
+#[test]
+fn 대상_기능의_테스트_파일은_테스트에만_홉_0으로_나온다() {
+    let dir = repo("analysis");
+    let spec = dir.path().join("docs/specs/payment-core.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace("tests: []", "tests:\n  - tests/core.test.ts"),
+    )
+    .unwrap();
+    std::fs::create_dir_all(dir.path().join("tests")).unwrap();
+    std::fs::write(
+        dir.path().join("tests/core.test.ts"),
+        "import { charge } from \"../services/payment/core/charge\";\nexport const run = () => charge(1);\n",
+    )
+    .unwrap();
+    common::git(dir.path(), &["add", "-A"]);
+    common::git(dir.path(), &["commit", "-qm", "test"]);
+    let report = json(&lore_in(
+        dir.path(),
+        &["impact", "services/payment/core/charge.ts"],
+    ));
+    assert!(!ids(&report["files"]).contains(&"tests/core.test.ts"));
+    assert_eq!(ids(&report["tests"]), ["tests/core.test.ts"]);
+    assert_eq!(report["tests"][0]["hop"], 0);
+}
+
+#[test]
+fn 이미_지난_기능으로_돌아오는_분석_길은_내지_않는다() {
+    let dir = repo("analysis");
+    std::fs::write(
+        dir.path().join("docs/specs/ledger.md"),
+        "---\nid: ledger\ntitle: 장부\npaths: []\ntests: []\ndepends_on: []\n---\n\n## 지금 동작\n\n장부를 씁니다.\n",
+    )
+    .unwrap();
+    let spec = dir.path().join("docs/specs/payment-notification.md");
+    let text = std::fs::read_to_string(&spec).unwrap();
+    std::fs::write(
+        &spec,
+        text.replace("depends_on: []", "depends_on:\n  - ledger"),
+    )
+    .unwrap();
+    // 결제 처리가 알림을 가져가고, 알림도 결제 처리를 가져가는 순환
+    std::fs::write(
+        dir.path().join("services/payment/core/hook.ts"),
+        "import { alert } from \"../../notification/alert\";\nexport const hook = alert;\n",
+    )
+    .unwrap();
+    common::git(dir.path(), &["add", "-A"]);
+    common::git(dir.path(), &["commit", "-qm", "ledger"]);
+    let output = lore_in(dir.path(), &["impact", "ledger", "--hop=3"]);
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert_eq!(
+        features(&json(&output)),
+        [
+            feature("ledger", 0, "declared"),
+            feature("payment-notification", 1, "declared"),
+            feature("payment-core", 2, "inferred"),
+        ]
+    );
+}
+
+#[test]
+fn 홉이_아주_커도_더_닿을_기능이_없으면_바로_끝난다() {
+    let dir = repo("analysis");
+    let started = std::time::Instant::now();
+    let output = lore_in(dir.path(), &["impact", "payment-core", "--hop=4000000000"]);
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(started.elapsed() < std::time::Duration::from_secs(30));
+}
