@@ -60,6 +60,32 @@ pub fn error_json(error: &ConnectorError) -> String {
     serde_json::json!({ "ok": false, "error": error }).to_string()
 }
 
+/// git 원격 주소가 GitHub이면 `https://github.com/<owner>/<repo>`를 돌려줍니다.
+pub fn github_web_url(url: &str) -> Option<String> {
+    // https://user:token@github.com/... 처럼 인증 정보가 든 주소도 읽습니다.
+    let url = match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let host_end = rest.find('/').unwrap_or(rest.len());
+            match rest[..host_end].rfind('@') {
+                Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+                None => url.to_string(),
+            }
+        }
+        None => url.to_string(),
+    };
+    let path = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("http://github.com/"))
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("ssh://github.com/"))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let mut parts = path.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    (parts.next().is_none() && !owner.is_empty() && !repo.is_empty())
+        .then(|| format!("https://github.com/{owner}/{repo}"))
+}
+
 /// 소스 폴더의 `sources/` 아래 소스 노트에서 `origin`과 `origin_version`을 읽습니다. `origin` 순이고 중복은 뺍니다.
 ///
 /// 코어와 같은 규칙으로 찾습니다. 하위 폴더까지 보고, `_`나 `.`로 시작하는 항목은 건너뜁니다.
@@ -196,6 +222,32 @@ mod tests {
                 origin_version: "v".to_string(),
             }]
         );
+    }
+
+    #[test]
+    fn github_원격_주소를_웹_주소로_바꾼다() {
+        for url in [
+            "https://github.com/Just-gomin/lore.git",
+            "https://github.com/Just-gomin/lore",
+            "git@github.com:Just-gomin/lore.git",
+            "ssh://git@github.com/Just-gomin/lore.git",
+        ] {
+            assert_eq!(
+                github_web_url(url).as_deref(),
+                Some("https://github.com/Just-gomin/lore"),
+                "{url}"
+            );
+        }
+        assert_eq!(
+            github_web_url("https://user:token@github.com/o/r.git").as_deref(),
+            Some("https://github.com/o/r")
+        );
+        assert_eq!(
+            github_web_url("https://github.com/o/x.git.git").as_deref(),
+            Some("https://github.com/o/x.git")
+        );
+        assert_eq!(github_web_url("https://gitlab.com/a/b.git"), None);
+        assert_eq!(github_web_url("https://github.com/a"), None);
     }
 
     #[test]
