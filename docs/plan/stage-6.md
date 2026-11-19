@@ -141,6 +141,8 @@
 
 정한 것: JSON의 대상에는 `mentions`(언급으로 보는 이름 목록), 기록에는 `mentioned`(그 기록 본문에서 찾은 이름)를 비어 있지 않을 때만 냅니다. 사람용 출력은 기록 줄 끝에 "언급됨(추론)"을 붙이고, `자세히:` 안내는 위로 올린 기록을 먼저 가리킵니다. 심볼을 대상으로 받으므로 `unsupported_target` 오류는 없앴습니다. 분석하지 않는 레포에서 심볼을 물으면 `target_not_found`입니다.
 
+확인: 0.4.0을 릴리스(lore #48, `v0.4.0`)하고 블로그에 다시 설치했습니다(블로그 #43). 블로그에서 `lore why features/note/lib/notes.ts#getAllNotes`를 물으면 `note`의 유효한 결정 다섯 중 본문에 `features/note/lib/notes.ts`를 적은 두 건(`ADR-20261117-fail-build-on-invalid-note-date`, `ADR-20261117-note-sort-slug-tiebreak`)이 "언급됨(추론)"으로 위에 옵니다.
+
 ## 끝나면
 
 - [ ] 진행 중인 프로젝트에서 분석을 켜고, 실제 변경 10건에서 `lore impact`의 추론 결과가 맞는지 리드 개발자가 확인합니다. 결과를 아래 표에 적습니다. 틀린 연결이 있으면 원인을 고치고, 빠진 연결은 동적 import처럼 분석이 잡을 수 없는 것인지 적습니다.
