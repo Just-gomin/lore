@@ -78,6 +78,19 @@ fn read_input(from: Option<&str>, cwd: &Path) -> Result<(String, String), error:
     }
 }
 
+/// `--origins` 파일들을 읽어 하나의 목록으로 합칩니다. 파일이 없으면 `None`이다.
+fn read_origins(paths: &[String], cwd: &Path) -> Result<Option<check::Origins>, error::LoreError> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut origins = check::Origins::new();
+    for path in paths {
+        let (name, text) = read_input(Some(path), cwd)?;
+        check::parse_origins(&name, &text, &mut origins)?;
+    }
+    Ok(Some(origins))
+}
+
 fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
     let result = match request {
         Request::Pending(command) => return output::not_implemented(command, for_human),
@@ -92,12 +105,7 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             base,
             pr_body,
             report,
-        } => origins
-            .map(|path| {
-                read_input(Some(&path), cwd)
-                    .and_then(|(name, text)| check::parse_origins(&name, &text))
-            })
-            .transpose()
+        } => read_origins(&origins, cwd)
             .and_then(|origins| {
                 let pr_body = pr_body
                     .map(|path| read_input(Some(&path), cwd).map(|(_, text)| text))

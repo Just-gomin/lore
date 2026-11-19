@@ -475,13 +475,15 @@ struct OriginEntry {
 }
 
 /// `--origins` 파일을 읽는다. `[{"origin": "...", "origin_version": "..."}]` 꼴이다.
-pub fn parse_origins(name: &str, text: &str) -> Result<Origins, LoreError> {
+///
+/// 읽은 목록을 `origins`에 더합니다. 커넥터마다 낸 목록을 여러 파일로 받기 위해서입니다.
+/// 같은 원본이 앞서 읽은 파일과 다른 판으로 나와도 `duplicate_origin`입니다.
+pub fn parse_origins(name: &str, text: &str, origins: &mut Origins) -> Result<(), LoreError> {
     let invalid = |code, message: String| LoreError::InvalidInput {
         problems: vec![Problem::new(name, None, code, message)],
     };
     let entries: Vec<OriginEntry> =
         serde_json::from_str(text).map_err(|error| invalid("invalid_json", error.to_string()))?;
-    let mut origins = Origins::new();
     for entry in entries {
         if let Some(old) = origins.get(&entry.origin)
             && *old != entry.origin_version
@@ -493,7 +495,7 @@ pub fn parse_origins(name: &str, text: &str) -> Result<Origins, LoreError> {
         }
         origins.insert(entry.origin, entry.origin_version);
     }
-    Ok(origins)
+    Ok(())
 }
 
 /// 소스 노트에 적힌 원본의 판이 목록의 최신 판과 같은지.
