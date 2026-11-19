@@ -198,7 +198,9 @@ pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreErro
         .base
         .map(|base| Diff::new(config, base))
         .transpose()?;
-    let changes = diff.as_ref().map(|diff| diff.changes.as_slice());
+    // 판단이 드는 검사는 `check.scope` 안에서 바뀐 파일만 봅니다.
+    let scoped = diff.as_ref().map(|diff| in_scope(config, &diff.changes));
+    let changes = scoped.as_deref();
     let (corpus, mut problems) = source::read_lenient(config);
     let files = git::tracked_files(&config.root)?;
     if let Err(more) = graph::build(&corpus, &config.root, &files) {
@@ -240,7 +242,7 @@ pub fn check(config: &Config, options: &Options) -> Result<CheckReport, LoreErro
         spec_update_check(
             config,
             &corpus,
-            diff.as_ref(),
+            diff.as_ref().zip(changes),
             &options.pr_body.map(parse_no_impact).unwrap_or_default(),
         )?,
         unmapped_check(config, &corpus, changes),
@@ -390,16 +392,17 @@ pub(crate) fn reached_specs<'a>(
 fn spec_update_check(
     config: &Config,
     corpus: &source::Corpus,
-    diff: Option<&Diff>,
+    diff: Option<(&Diff, &[Change])>,
     no_impact: &BTreeMap<String, String>,
 ) -> Result<Check, LoreError> {
     const ID: &str = "spec_update";
     const LABEL: &str = "스펙 동반 갱신";
-    let Some(diff) = diff else {
+    // 스펙이 바뀌었는지는 전체 변경으로, 걸린 스펙은 범위 안의 변경으로 봅니다.
+    let Some((diff, changes)) = diff else {
         return Ok(Check::skipped(ID, LABEL, false, NO_BASE));
     };
     let mut findings = Vec::new();
-    for (doc, files) in reached_specs(corpus, &diff.changes) {
+    for (doc, files) in reached_specs(corpus, changes) {
         let reason = no_impact.get(&doc.id).cloned();
         let outcome = if diff.body_changed(config, doc)? {
             Outcome::Updated
@@ -432,21 +435,14 @@ fn unmapped_check(config: &Config, corpus: &source::Corpus, changes: Option<&[Ch
     let Some(changes) = changes else {
         return Check::skipped(ID, LABEL, false, NO_BASE);
     };
-    let specs = SpecGlobs::all(corpus);
-    let ignore = compile(&config.ignore);
-    let installed = install::installed_files();
-    let docs = format!("{}/", config.docs);
+    let coverage = Coverage::new(config, corpus);
     let findings = changes
         .iter()
         .filter(|change| matches!(change.kind, ChangeKind::Added | ChangeKind::Renamed))
         .map(|change| change.path.as_str())
-        .filter(|path| {
-            !path.starts_with(&docs)
-                && *path != CONFIG_FILE
-                && !installed.iter().any(|file| file == path)
-                && !ignore.iter().any(|glob| glob.is_match(path))
-                && !specs.iter().any(|spec| spec.matches(path))
-        })
+        // 범위 밖으로 이름이 바뀐 파일은 범위 안의 매핑을 따질 대상이 아닙니다.
+        .filter(|path| scope_contains(config, path))
+        .filter(|path| coverage.is_code(path) && !coverage.is_mapped(path))
         .map(|path| Finding {
             spec: None,
             files: vec![path.to_string()],
@@ -460,6 +456,60 @@ fn unmapped_check(config: &Config, corpus: &source::Corpus, changes: Option<&[Ch
         findings,
         "파일을 맡을 스펙의 paths나 tests에 더하세요. 코드가 아니면 lore.config.yaml의 check.ignore에 더하세요.",
     )
+}
+
+/// `check.scope` 안에서 바뀐 파일. 이름이 바뀐 파일은 원래 경로나 새 경로가 범위 안이면 넣습니다.
+fn in_scope(config: &Config, changes: &[Change]) -> Vec<Change> {
+    let Some(scope) = &config.scope else {
+        return changes.to_vec();
+    };
+    let globs = compile(scope);
+    let inside = |path: &str| globs.iter().any(|glob| glob.is_match(path));
+    changes
+        .iter()
+        .filter(|change| inside(&change.path) || change.from.as_deref().is_some_and(inside))
+        .cloned()
+        .collect()
+}
+
+/// 경로가 `check.scope` 안인지. 범위가 없으면 모두 안입니다.
+fn scope_contains(config: &Config, path: &str) -> bool {
+    config
+        .scope
+        .as_ref()
+        .is_none_or(|scope| compile(scope).iter().any(|glob| glob.is_match(path)))
+}
+
+/// 파일이 스펙에 속하는지 가르는 기준. 매핑 누락 검사와 `lore init`이 함께 씁니다.
+pub(crate) struct Coverage<'a> {
+    specs: Vec<SpecGlobs<'a>>,
+    ignore: Vec<GlobMatcher>,
+    installed: Vec<String>,
+    docs: String,
+}
+
+impl<'a> Coverage<'a> {
+    pub fn new(config: &Config, corpus: &'a source::Corpus) -> Coverage<'a> {
+        Coverage {
+            specs: SpecGlobs::all(corpus),
+            ignore: compile(&config.ignore),
+            installed: install::installed_files(),
+            docs: format!("{}/", config.docs),
+        }
+    }
+
+    /// 스펙이 맡아야 할 파일인지. 소스 폴더, 설정 파일, lore가 설치한 파일, `check.ignore`는 아닙니다.
+    pub fn is_code(&self, path: &str) -> bool {
+        !path.starts_with(&self.docs)
+            && path != CONFIG_FILE
+            && !self.installed.iter().any(|file| file == path)
+            && !self.ignore.iter().any(|glob| glob.is_match(path))
+    }
+
+    /// 어떤 스펙의 `paths`, `tests`에 맞는지.
+    pub fn is_mapped(&self, path: &str) -> bool {
+        self.specs.iter().any(|spec| spec.matches(path))
+    }
 }
 
 /// 원본의 최신 판 목록. 원본 링크 → 판(해시나 수정 시각).

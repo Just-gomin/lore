@@ -81,7 +81,7 @@ fn resolve(
 }
 
 /// 현재 폴더 기준 경로를 프로젝트 홈 기준 경로로 바꾼다. 파일이 없거나 홈 밖이면 `None`이다.
-fn project_path(root: &Path, cwd: &Path, input: &str) -> Option<String> {
+pub(crate) fn project_path(root: &Path, cwd: &Path, input: &str) -> Option<String> {
     let root = root.canonicalize().ok()?;
     let file = cwd.join(input).canonicalize().ok()?;
     let relative = file.strip_prefix(&root).ok()?;

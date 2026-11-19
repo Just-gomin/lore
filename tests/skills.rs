@@ -2,7 +2,7 @@
 //!
 //! 명령의 인자가 바뀌면 이 테스트가 실패해, 스킬도 같은 PR에서 고치게 한다.
 
-use lore::cli::{self, Invocation, Request};
+use lore::cli::{self, Invocation};
 use lore::install::{AGENTS_BODY, SKILLS};
 
 /// 마크다운에서 `lang` 코드블록의 내용을 모은다.
@@ -98,12 +98,7 @@ fn 스킬과_안내문의_lore_명령은_구현된_명령으로_해석된다() {
     for (name, text) in texts {
         for args in sh_commands(text) {
             match cli::parse(&args) {
-                Ok(Invocation::Run { request, .. }) => {
-                    assert!(
-                        !matches!(request, Request::Pending(_)),
-                        "{name}: 아직 구현되지 않은 명령 {args:?}"
-                    );
-                }
+                Ok(Invocation::Run { .. }) => {}
                 other => panic!("{name}: {args:?}를 해석하지 못했습니다: {other:?}"),
             }
             checked += 1;

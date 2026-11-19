@@ -781,3 +781,70 @@ fn 원본_목록을_여러_파일로_주면_합쳐서_비교한다() {
     assert_eq!(report["error"]["problems"][0]["code"], "duplicate_origin");
     assert_eq!(report["error"]["problems"][0]["path"], "b.json");
 }
+
+#[test]
+fn check_scope_밖의_변경은_판단이_드는_검사가_보지_않는다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{original}\ncheck:\n  scope: ['services/payment/**']\n"),
+    )
+    .unwrap();
+    commit_all(dir.path(), "판단 검사 범위");
+    edit(
+        dir.path(),
+        "services/notification/retry-alert.ts",
+        "export",
+        "// 범위 밖\nexport",
+    );
+    std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+    std::fs::write(dir.path().join("tools/seed.ts"), "export {};\n").unwrap();
+    commit_all(dir.path(), "범위 밖 변경");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+    assert!(findings(&report, "spec_update").is_empty());
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+
+    // 범위 안의 변경은 그대로 본다.
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 범위 안\nexport",
+    );
+    commit_all(dir.path(), "범위 안 변경");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+
+    // 빈 목록이면 아무것도 보지 않는다.
+    std::fs::write(&config, format!("{original}\ncheck:\n  scope: []\n")).unwrap();
+    commit_all(dir.path(), "검사 끔");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+    assert!(findings(&report, "spec_update").is_empty());
+}
+
+#[test]
+fn check_scope_밖으로_이름을_바꾼_파일은_매핑_누락으로_보지_않는다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{original}\ncheck:\n  scope: ['services/payment/**']\n"),
+    )
+    .unwrap();
+    commit_all(dir.path(), "판단 검사 범위");
+    std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+    git(
+        dir.path(),
+        &["mv", "services/payment/retry/policy.ts", "tools/policy.ts"],
+    );
+    commit_all(dir.path(), "범위 밖으로 옮김");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+    // 원래 경로가 범위 안이라 옮겨 간 스펙의 동반 갱신은 본다.
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+}
