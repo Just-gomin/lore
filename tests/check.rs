@@ -627,7 +627,7 @@ fn 판단이_드는_검사의_사람용_출력은_스펙과_파일을_보여_준
         text.contains(
             "경고  스펙 동반 갱신
   payment-notification 영향 없음으로 넘김: 주석만 바꿈
-  payment-retry 스펙이 바뀌지 않았습니다. 바뀐 파일: services/payment/retry/policy.ts
+  payment-retry 스펙의 본문이 바뀌지 않았습니다. 바뀐 파일: services/payment/retry/policy.ts
   고치려면: "
         ),
         "{text}"
