@@ -7,6 +7,16 @@ project:
 # sensitivity: normal | sensitive | excluded. 여기에 없는 채널은 sensitive로 다룹니다.
 channels: []
 
+# 파일 가져오기에서 확장자마다 쓸 추출기. lore는 실행하지 않고 lore-source 스킬이 부릅니다.
+# 실행 파일은 lore 릴리스의 lore-extractor-<이름>-<타깃>.tar.gz에 있습니다. 이미지는 tesseract가 필요합니다.
+extractors:
+  - command: lore-extractor-markdown
+    extensions: [md, markdown, txt]
+  - command: lore-extractor-xlsx
+    extensions: [xlsx, xls, ods]
+  - command: lore-extractor-image
+    extensions: [png, jpg, jpeg]
+
 check:
   # 어떤 스펙에도 속하지 않아도 되는 파일의 글롭. lore check의 매핑 누락 검사에서 뺍니다.
   # 예: ['*.md', '.github/**', 'package.json']

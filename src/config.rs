@@ -24,6 +24,16 @@ pub struct Config {
     /// 판단이 드는 검사가 볼 파일의 글롭. 없으면 전체, 빈 목록이면 아무 파일도 보지 않는다.
     /// `lore init`을 마친 모듈부터 검사를 켜기 위해서다.
     pub scope: Option<Vec<String>>,
+    /// 파일 확장자마다 쓸 추출기. 코어는 형식만 검사하고 실행하지 않는다. 스킬이 읽는다.
+    pub extractors: Vec<Extractor>,
+}
+
+/// `extractors`의 항목. 기획서 6장의 추출기 규약을 따르는 실행 파일이다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Extractor {
+    pub command: String,
+    /// 점 없는 소문자 확장자
+    pub extensions: Vec<String>,
 }
 
 /// `analysis` 항목. `language`가 있어야 분석한다.
@@ -91,6 +101,15 @@ struct RawConfig {
     #[serde(default)]
     check: RawCheck,
     analysis: Option<RawAnalysis>,
+    #[serde(default)]
+    extractors: Vec<RawExtractor>,
+}
+
+#[derive(Deserialize)]
+struct RawExtractor {
+    command: String,
+    #[serde(default)]
+    extensions: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -227,6 +246,40 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         }
     };
 
+    let mut extractors = Vec::new();
+    let mut owners: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    for raw in raw.extractors {
+        let command = raw.command.trim().to_string();
+        if command.is_empty() {
+            return Err(invalid("extractors의 command가 비어 있습니다.".to_string()));
+        }
+        if raw.extensions.is_empty() {
+            return Err(invalid(format!(
+                "추출기 '{command}'의 extensions가 비어 있습니다."
+            )));
+        }
+        for extension in &raw.extensions {
+            let valid = !extension.is_empty()
+                && extension
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+            if !valid {
+                return Err(invalid(format!(
+                    "추출기 '{command}'의 확장자 '{extension}'는 점 없는 소문자여야 합니다(예: png)."
+                )));
+            }
+            if let Some(other) = owners.insert(extension.clone(), command.clone()) {
+                return Err(invalid(format!(
+                    "확장자 '{extension}'가 추출기 '{other}'와 '{command}'에 함께 있습니다."
+                )));
+            }
+        }
+        extractors.push(Extractor {
+            command,
+            extensions: raw.extensions,
+        });
+    }
+
     Ok(Config {
         root: root.to_path_buf(),
         docs,
@@ -234,6 +287,7 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         ignore: raw.check.ignore,
         scope: raw.check.scope,
         analysis,
+        extractors,
     })
 }
 
@@ -350,5 +404,33 @@ mod tests {
     fn docs가_홈_밖을_가리키면_오류다() {
         let text = "version: 1\nproject:\n  docs: ../docs\n";
         assert!(matches!(config(text), Err(LoreError::InvalidConfig { .. })));
+    }
+
+    #[test]
+    fn 추출기는_확장자마다_하나만_등록한다() {
+        let parsed = config(
+            "version: 1\nextractors:\n  - command: lore-extractor-image\n    extensions: [png, jpg]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            parsed.extractors,
+            [Extractor {
+                command: "lore-extractor-image".to_string(),
+                extensions: vec!["png".to_string(), "jpg".to_string()],
+            }]
+        );
+        for text in [
+            "version: 1\nextractors:\n  - command: a\n    extensions: [png]\n  - command: b\n    extensions: [png]\n",
+            "version: 1\nextractors:\n  - command: a\n    extensions: ['.png']\n",
+            "version: 1\nextractors:\n  - command: a\n    extensions: [PNG]\n",
+            "version: 1\nextractors:\n  - command: a\n",
+            "version: 1\nextractors:\n  - command: ' '\n    extensions: [png]\n",
+            "version: 1\nextractors:\n  - extensions: [png]\n",
+        ] {
+            assert!(
+                matches!(config(text), Err(LoreError::InvalidConfig { .. })),
+                "{text}"
+            );
+        }
     }
 }

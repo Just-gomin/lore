@@ -4,7 +4,7 @@
 
 ## 먼저 읽을 문서
 
-- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른네 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
+- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른다섯 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
 - [`docs/plan/stage-4.md`](docs/plan/stage-4.md): 지금 하고 있는 4단계의 작업 순서와 완료 기준입니다. 끝난 단계는 [`stage-2.md`](docs/plan/stage-2.md), [`stage-3.md`](docs/plan/stage-3.md)에 있습니다. 그 뒤 단계는 [`stage-5.md`](docs/plan/stage-5.md)(구현을 마치고 업무 프로젝트 적용을 기다림), [`stage-6.md`](docs/plan/stage-6.md)(구현을 마치고 업무 프로젝트 확인을 기다림), [`stage-7.md`](docs/plan/stage-7.md)(지금 구현하는 단계. 4\~6단계의 사람 확인과 함께 진행)이며, 앞 단계가 끝나기 전에 미리 썼습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
@@ -14,7 +14,7 @@
 - lore 코어는 네트워크와 LLM 없이 동작합니다. 같은 입력에는 같은 출력을 냅니다. 요약이나 판단처럼 LLM이 필요한 일은 코어에 넣지 않고 에이전트 스킬에 둡니다.
 - 모든 명령의 기본 출력은 JSON입니다. 사람용 텍스트는 `--for-human`일 때만 냅니다. JSON일 때는 오류도 표준 출력으로 냅니다.
 - 디비는 소스에서 다시 만들 수 있는 빌드 산출물입니다. 커밋하지 않습니다.
-- 채널에서 자료를 꺼내는 커넥터와 비텍스트 추출기는 코어에 넣지 않습니다. 커넥터는 인자를 받아 표준 출력으로 JSON을 내는 별도 실행 파일(기획서 6장 커넥터 규약)이고 코어 크레이트에 의존하지 않습니다. 추출기는 표준 입출력으로 JSON을 주고받는 별도 실행 파일로 둡니다.
+- 채널에서 자료를 꺼내는 커넥터와 파일을 읽는 추출기는 코어에 넣지 않습니다. 커넥터는 인자를 받아 표준 출력으로 JSON을 내는 별도 실행 파일(기획서 6장 커넥터 규약)이고 코어 크레이트에 의존하지 않습니다. 추출기는 표준 입력으로 JSON을 받아 표준 출력으로 후보를 내는 별도 실행 파일(기획서 6장 추출기 규약)이고, 역시 코어 크레이트에 의존하지 않습니다.
 
 ## 구조
 
@@ -46,9 +46,10 @@
 | `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `src/sync.rs`        | `lore sync`: 이름 변경에 맞춰 스펙의 경로 고치기     |
 | `src/init.rs`        | `lore init`: 기존 프로젝트 도입의 진행 상태          |
-| `connectors/common/` | 커넥터가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석 |
+| `connectors/common/` | 커넥터와 추출기가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석, 추출기 입력 |
 | `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `connectors/github/` | `lore-connector-github`: GitHub PR과 이슈에서 후보 뽑기, 최신 판 목록 |
+| `extractors/markdown/` | `lore-extractor-markdown`: 마크다운과 텍스트 파일을 후보로 |
 | `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬(`lore init` 스킬 포함), 워크플로 |
 | `.github/workflows/` | 이 레포의 CI(`ci.yaml`)와 태그를 올리면 바이너리를 올리는 릴리스(`release.yaml`) |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |

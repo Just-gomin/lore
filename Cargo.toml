@@ -1,5 +1,11 @@
 [workspace]
-members = [".", "connectors/common", "connectors/git", "connectors/github"]
+members = [
+    ".",
+    "connectors/common",
+    "connectors/git",
+    "connectors/github",
+    "extractors/markdown",
+]
 resolver = "3"
 
 [workspace.package]

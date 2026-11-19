@@ -451,6 +451,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml_ng",
+ "sha2",
  "tempfile",
 ]
 
@@ -475,6 +476,15 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+]
+
+[[package]]
+name = "lore-extractor-markdown"
+version = "0.4.0"
+dependencies = [
+ "lore-connector-common",
+ "serde_json",
+ "serde_yaml_ng",
 ]
 
 [[package]]

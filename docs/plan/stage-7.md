@@ -51,13 +51,13 @@
 
 ### 1. 추출기 규약과 마크다운 추출기
 
-- [ ] 기획서 6장에 "추출기 규약"을 적습니다.
+- [x] 기획서 6장에 "추출기 규약"을 적습니다.
   - **입력**: 표준 입력으로 JSON 하나를 받습니다. `file`(읽을 파일 경로), `channel`(채널 ID), `origin`(원본 링크)은 꼭 있어야 합니다. `kind`(기본 `reference`), `title`, `occurred_at`(`YYYY-MM-DD`)은 있으면 그대로 씁니다. 추출기마다 더 받는 항목은 추출기가 정합니다(엑셀의 `max_rows`, 이미지의 `lang`). 모르는 항목은 오류입니다.
   - **출력**: 커넥터의 후보 출력과 같은 `{"ok": true, "candidates": [...]}`이고, 파일 하나에 후보 하나입니다. 그래서 스킬은 커넥터 후보와 같은 방법으로 정제합니다. `lore add source`에는 후보에서 `text`를 빼고 `slug`와 `body`를 더해 넘깁니다.
   - **원본의 판**: `origin_version`은 파일 내용의 sha256을 소문자 16진수로 쓴 것(`shasum -a 256`과 같은 값)입니다. 같은 `origin`으로 다시 넣으면 `lore add source`의 `change`가 `unchanged`입니다.
   - **제목과 날짜**: 입력에 없으면 파일에서 찾습니다. 형식마다 찾는 곳은 아래 추출기 항목에 적습니다. 제목은 마지막으로 파일 이름에서 확장자를 뺀 것을 씁니다. 날짜를 찾지 못하면 `occurred_at_missing` 오류로 끝나고, 부르는 쪽이 `occurred_at`을 넘겨 다시 부릅니다.
   - **오류**: 커넥터와 같은 `{"ok": false, "error": {...}}`와 0이 아닌 종료 코드입니다. 공통 코드는 `invalid_input`(입력 JSON이 깨졌거나 꼭 있어야 할 항목이 없거나 모르는 항목이 있음), `io`(파일이 없거나 읽지 못함), `unreadable_file`(형식에 맞지 않는 파일), `occurred_at_missing`입니다.
-- [ ] 기획서 5장 `lore.config` 파일 절에 `extractors`를 예시와 함께 적고, `src/config.rs`가 읽게 합니다. 항목마다 `command`(실행 파일 이름)와 `extensions`(점 없는 소문자 확장자 목록)가 있습니다. 같은 확장자를 두 추출기에 적거나 형식이 틀리면 `invalid_config`입니다. 코어는 형식만 검사하고 실행하지 않습니다. 스킬은 파일의 확장자를 소문자로 바꿔 찾습니다(카메라는 `.JPG`로 씁니다). `channels`의 `tool: file`은 "파일 가져오기"라는 수집 경로이고, 그 파일을 어느 추출기로 읽을지는 `extractors`가 정한다고 함께 적습니다.
+- [x] 기획서 5장 `lore.config` 파일 절에 `extractors`를 예시와 함께 적고, `src/config.rs`가 읽게 합니다. 항목마다 `command`(실행 파일 이름)와 `extensions`(점 없는 소문자 확장자 목록)가 있습니다. 같은 확장자를 두 추출기에 적거나 형식이 틀리면 `invalid_config`입니다. 코어는 형식만 검사하고 실행하지 않습니다. 스킬은 파일의 확장자를 소문자로 바꿔 찾습니다(카메라는 `.JPG`로 씁니다). `channels`의 `tool: file`은 "파일 가져오기"라는 수집 경로이고, 그 파일을 어느 추출기로 읽을지는 `extractors`가 정한다고 함께 적습니다.
 
   ```yaml
   extractors:
@@ -65,11 +65,13 @@
       extensions: [png, jpg, jpeg]
   ```
 
-- [ ] `lore install`이 만드는 기본 설정에 세 추출기를 등록합니다. 이미 있는 설정은 지금처럼 건드리지 않습니다.
-- [ ] `lore-extractor-markdown`을 만듭니다. 본문을 그대로 `text`로 냅니다. UTF-8이 아니면 `unreadable_file`입니다. 머리말이 있으면 떼어 내고, 머리말의 `title`과 `date`(`YYYY-MM-DD`)를 제목과 날짜로 씁니다. 머리말에 제목이 없으면 첫 `#` 제목을 씁니다. 머리말에 날짜가 없으면 `occurred_at_missing`입니다.
-- [ ] 이 PR에서 기획서 8장 로드맵 7단계를 "이미지, 엑셀 추출기"로 고치고, 9장에 "비텍스트 추출기의 범위" 행을 더합니다(이미지는 외부 tesseract, 엑셀과 마크다운은 추출기 안에서, 녹음과 비디오는 필요를 느낄 때, 추출기로 만든 노트의 신선도는 확인하지 않음). 9장 표 위의 결정 수와 `AGENTS.md`의 결정 수를 서른다섯으로 고칩니다.
+- [x] `lore install`이 만드는 기본 설정에 세 추출기를 등록합니다. 이미 있는 설정은 지금처럼 건드리지 않습니다.
+- [x] `lore-extractor-markdown`을 만듭니다. 본문을 그대로 `text`로 냅니다. UTF-8이 아니면 `unreadable_file`입니다. 머리말이 있으면 떼어 내고, 머리말의 `title`과 `date`(`YYYY-MM-DD`)를 제목과 날짜로 씁니다. 머리말에 제목이 없으면 첫 `#` 제목을 씁니다. 머리말에 날짜가 없으면 `occurred_at_missing`입니다.
+- [x] 이 PR에서 기획서 8장 로드맵 7단계를 "이미지, 엑셀 추출기"로 고치고, 9장에 "비텍스트 추출기의 범위" 행을 더합니다(이미지는 외부 tesseract, 엑셀과 마크다운은 추출기 안에서, 녹음과 비디오는 필요를 느낄 때, 추출기로 만든 노트의 신선도는 확인하지 않음). 9장 표 위의 결정 수와 `AGENTS.md`의 결정 수를 서른다섯으로 고칩니다.
 
 완료 기준: 고정 마크다운 파일에서 기대한 후보가 나오고, 그 후보에서 `text`를 빼고 `slug`와 `body`를 더한 JSON이 `lore add source`를 통과합니다(이 확인은 PR 설명에 적습니다). 설정의 `extractors` 형식 오류가 `invalid_config`로 나옵니다.
+
+확인: 고정 파일 `meeting.md`의 후보에서 `text`를 빼고 `slug`와 `body`를 더한 JSON을 임시 레포에서 `lore add source --from`으로 넘기면 `created`, 같은 JSON을 다시 넘기면 `unchanged`가 나옵니다.
 
 ### 2. 엑셀 추출기
 

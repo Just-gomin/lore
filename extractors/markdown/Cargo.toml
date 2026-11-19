@@ -1,0 +1,14 @@
+[package]
+name = "lore-extractor-markdown"
+version.workspace = true
+edition.workspace = true
+description = "마크다운과 텍스트 파일을 lore 소스 노트 후보로 바꾸는 추출기"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+lore-connector-common = { path = "../../connectors/common" }
+serde_yaml_ng.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
