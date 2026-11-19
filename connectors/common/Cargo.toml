@@ -2,14 +2,16 @@
 name = "lore-connector-common"
 version.workspace = true
 edition.workspace = true
-description = "lore 커넥터가 함께 쓰는 출력 형식과 소스 노트 읽기"
+description = "lore 커넥터와 추출기가 함께 쓰는 출력 형식과 소스 노트 읽기"
 license.workspace = true
 repository.workspace = true
 
 [dependencies]
+chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml_ng.workspace = true
+sha2.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
