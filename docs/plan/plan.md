@@ -323,7 +323,7 @@ lore install [--dry-run] [--no-skills] [--no-ci] [--init]
 - **도구별 파일**: `CLAUDE.md`, `GEMINI.md`가 있으면 같은 표식 안에 `AGENTS.md`의 lore 구간을 따르라는 한 줄만 넣습니다. 없는 파일은 만들지 않습니다. 본문은 `AGENTS.md` 한 곳에만 둡니다.
 - **설정과 문서 뼈대**: `lore.config.yaml`과 `docs/` 폴더 구조가 없으면 만듭니다.
 - **스킬과 CI**: 에이전트 스킬 파일(`.claude/skills/lore-record/SKILL.md`, `.claude/skills/lore-source/SKILL.md`, `.claude/skills/lore-sync/SKILL.md`)과 `lore check`를 실행하는 GitHub Actions 워크플로를 설치합니다. `--no-skills`, `--no-ci`로 끌 수 있습니다. 사람이 고친 스킬은 덮어쓰지 않습니다.
-- **기존 프로젝트**: `--init`을 주면 `lore init`의 세 스킬(`lore-init-channels`, `lore-init-collect`, `lore-init-draft`)도 설치하고, 새로 만드는 설정에 `check.scope: []`를 넣어 `lore init`을 마치기 전에는 판단이 드는 검사가 아무 파일도 보지 않게 합니다. 신규 프로젝트는 `--init` 없이 설치합니다.
+- **기존 프로젝트**: `--init`을 주면 `lore init`의 세 스킬(`lore-init-channels`, `lore-init-collect`, `lore-init-draft`)도 설치하고, 새로 만드는 설정에 `check.scope: []`를 넣어 `lore init`을 마치기 전에는 판단이 드는 검사가 아무 파일도 보지 않게 합니다. 신규 프로젝트는 `--init` 없이 설치합니다. `--no-skills`면 init 스킬도 설치하지 않고, `--init` 없이 다시 설치해도 이미 있는 init 스킬은 새 버전으로 바꿉니다. 이미 설정이 있으면 `check.scope`를 넣지 않으므로 `lore-init-channels` 스킬이 사람에게 묻고 더합니다.
 
 ```markdown
 <!-- lore:begin v1 -->

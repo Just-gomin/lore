@@ -146,7 +146,7 @@
   - `lore build`를 처음 실행하고, 초안과 `docs/INDEX.md`를 확인할 질문 목록과 함께 PR로 올립니다.
   - 판단이 드는 검사를 켤 범위를 `check.scope`에 적습니다.
 - [x] `lore install --init`은 설정을 새로 만들 때 `check.scope: []`를 넣어, `lore init`을 마치기 전에는 판단이 드는 검사가 아무것도 걸지 않게 합니다. `lore-init-draft`가 마친 범위를 적으면 그 범위부터 켜집니다.
-- [x] 세 스킬은 `lore install --init`일 때만 설치합니다. 신규 프로젝트는 `lore init`을 실행하지 않기 때문입니다. `lore uninstall`은 설치한 스킬을 모두 걷어냅니다. 명령 예시는 `tests/skills.rs`가 확인합니다. 기획서 5장 `lore install`의 스킬 목록과 사용법 줄, `lore.config` 파일 절(`channels[].scope`), 9장 "설치 명령" 행(신규 프로젝트는 `--init` 없이 설치)을 고칩니다.
+- [x] 세 스킬은 `lore install --init`일 때만 설치합니다. `--no-skills`면 init 스킬도 설치하지 않습니다. init 스킬이 `lore-source`, `lore-record` 스킬을 쓰기 때문입니다. `--init` 없이 다시 설치해도 이미 있는 init 스킬은 새 버전으로 바꿉니다. 신규 프로젝트는 `lore init`을 실행하지 않기 때문입니다. `lore uninstall`은 설치한 스킬을 모두 걷어냅니다. 명령 예시는 `tests/skills.rs`가 확인합니다. 기획서 5장 `lore install`의 스킬 목록과 사용법 줄, `lore.config` 파일 절(`channels[].scope`), 9장 "설치 명령" 행(신규 프로젝트는 `--init` 없이 설치)을 고칩니다.
 
 완료 기준: 연습 레포의 임시 복사본에서 세 스킬을 차례로 따릅니다.
 
@@ -160,8 +160,8 @@
 확인: lore 레포의 임시 복사본에서 `lore install --init` 뒤 세 스킬을 `--scope connectors`로 따랐습니다(아래 연습 기록). 범위의 코드 파일 18개가 모두 스펙에 속했고, 결정 초안 3건이 모두 소스 노트를 근거로 가졌으며, 기계적 검사가 모두 통과했습니다. 막힌 곳은 다음과 같고 `lore-init-collect`에 반영했습니다.
 
 - 에이전트 도구로 읽은 열린 PR의 소스 노트에 GitHub의 수정 시각을 판으로 적었더니, GitHub 커넥터의 `--origins`가 같은 주소를 원문 해시로 매겨 `stale_source`가 났습니다. 커넥터가 판을 매기는 원본은 어느 경로로 모았든 커넥터의 `--origins`가 내는 판을 적도록 했습니다. 고친 뒤 신선도가 통과했고, 확인하지 못한 1건은 커넥터가 맡지 않는 파일 가져오기 노트였습니다.
-- squash merge만 하는 레포에서는 `--exclude-pr-commits`를 준 git 커넥터의 후보가 비었습니다. 정상이라고 적었습니다.
-
+- squash merge만 하는 레포에서는 `--exclude-pr-commits`를 준 git 커넥터의 후보가 비었습니다. 정상이라고 적었습니다. 그래서 완료 기준의 "커넥터는 git과 GitHub" 중 git 커넥터의 소스 노트는 만들지 않았습니다. git 커넥터의 후보 추출은 2번의 고정 예제와 블로그에서 확인했습니다.
+- 검토에서 나온 것도 스킬에 반영했습니다. 민감 채널은 원문을 읽지 않고 제목, 날짜, 링크로 사람이 고릅니다. 이미 `lore install`을 했던 레포(설정에 `check.scope` 없음)에서는 사람에게 묻고 `check.scope: []`를 더합니다.
 
 ### 7. 릴리스
 

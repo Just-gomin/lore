@@ -10,10 +10,12 @@ description: 기존 코드와 이력이 있는 프로젝트에 lore를 들일 �
 ## 1. 지금 상태 보기
 
 ```sh
-lore init --for-human
+lore init
 ```
 
 `next`가 `channels`가 아니면 이 단계는 끝났습니다. `next`에 맞는 스킬로 넘어갑니다.
+
+`lore.config.yaml`에 `check.scope`가 없으면, 이미 `lore install`을 실행했던 레포라 판단이 드는 검사가 모든 파일을 보고 있습니다. 사람에게 알리고, 동의하면 `check:` 아래에 `scope: []`를 더해 `lore init`을 마친 모듈부터 검사를 켭니다.
 
 ## 2. 도구 묻기
 

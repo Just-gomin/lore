@@ -172,24 +172,24 @@ pub fn install(cwd: &Path, dry_run: bool, parts: Parts) -> Result<InstallReport,
         }
     }
 
+    // `--no-skills`면 init 스킬도 설치하지 않습니다. init 스킬이 lore-source, lore-record 스킬을 쓰기 때문입니다.
+    // `--init` 없이 다시 설치해도 이미 있는 init 스킬은 새 버전으로 바꿉니다.
     let mut skills: Vec<(&str, &str)> = Vec::new();
     if parts.skills {
         skills.extend(SKILLS);
-    }
-    if parts.init {
-        skills.extend(INIT_SKILLS);
-    }
-    {
-        for (name, template) in skills {
-            let path = skill_path(name);
-            let text = installed_skill(template);
-            match plan.read(&path)? {
-                // 사람이 고친 스킬은 덮어쓰지 않는다.
-                Some(old) if old != text && !skill_untouched(&old) => {
-                    plan.record(&path, Change::Kept)
-                }
-                old => plan.write(&path, old.as_deref(), &text)?,
+        for (name, template) in INIT_SKILLS {
+            if parts.init || root.join(skill_path(name)).exists() {
+                skills.push((name, template));
             }
+        }
+    }
+    for (name, template) in skills {
+        let path = skill_path(name);
+        let text = installed_skill(template);
+        match plan.read(&path)? {
+            // 사람이 고친 스킬은 덮어쓰지 않는다.
+            Some(old) if old != text && !skill_untouched(&old) => plan.record(&path, Change::Kept),
+            old => plan.write(&path, old.as_deref(), &text)?,
         }
     }
 
