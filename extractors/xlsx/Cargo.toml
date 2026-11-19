@@ -1,0 +1,15 @@
+[package]
+name = "lore-extractor-xlsx"
+version.workspace = true
+edition.workspace = true
+description = "엑셀과 OpenDocument 스프레드시트를 lore 소스 노트 후보로 바꾸는 추출기"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+calamine = { version = "0.38.0", default-features = false, features = ["dates"] }
+chrono.workspace = true
+lore-connector-common = { path = "../../connectors/common" }
+
+[dev-dependencies]
+serde_json.workspace = true
