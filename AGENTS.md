@@ -43,6 +43,7 @@
 | `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `src/sync.rs`        | `lore sync`: 이름 변경에 맞춰 스펙의 경로 고치기     |
 | `connectors/common/` | 커넥터가 함께 쓰는 출력 형식과 소스 노트 읽기        |
+| `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬, 워크플로 |
 | `.github/workflows/` | 이 레포의 CI(`ci.yaml`)와 태그를 올리면 바이너리를 올리는 릴리스(`release.yaml`) |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
