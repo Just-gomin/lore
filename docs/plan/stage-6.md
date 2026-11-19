@@ -84,12 +84,16 @@
 
 ### 3. 심볼
 
-- [ ] 파일마다 내보낸 이름(함수, 클래스, 변수, 타입, 인터페이스, 클래스의 메서드)을 심볼 노드 `파일경로#이름`(멤버는 `#Class.method`, `export default`는 `#default`)으로 만들고, 심볼 → 파일 속함 엣지를 만듭니다.
-- [ ] import한 이름을 그 이름을 내보낸 심볼에 잇습니다. 가져온 파일에서 그 이름을 쓰는 최상위 선언이 내보낸 심볼이면 심볼 → 심볼, 내보내지 않았거나 최상위 선언 밖에서 쓰면 파일 → 심볼 의존함 엣지를 만듭니다.
-- [ ] re-export(`export { x } from`, `export * from`)는 원래 심볼까지 따라갑니다. 폴더의 `index.ts`를 거친 import가 실제 정의에 닿게 하기 위해서입니다.
-- [ ] 이 PR에서 기획서 3장의 엣지 표(의존함에 파일 → 심볼, 속함에 심볼 → 파일)를 고칩니다. #20이 아직 병합되지 않았으면 그 PR이 고치려던 4장 컴파일러의 정적 분석 단계와 6장 분석기 설명의 속함 엣지 문장도 함께 고칩니다.
+- [x] 파일마다 내보낸 이름(함수, 클래스, 변수, 타입, 인터페이스, 클래스의 메서드)을 심볼 노드 `파일경로#이름`(멤버는 `#Class.method`, `export default`는 `#default`)으로 만들고, 심볼 → 파일 속함 엣지를 만듭니다.
+- [x] import한 이름을 그 이름을 내보낸 심볼에 잇습니다. 가져온 파일에서 그 이름을 쓰는 최상위 선언이 내보낸 심볼이면 심볼 → 심볼, 내보내지 않았거나 최상위 선언 밖에서 쓰면 파일 → 심볼 의존함 엣지를 만듭니다.
+- [x] re-export(`export { x } from`, `export * from`)는 원래 심볼까지 따라갑니다. 폴더의 `index.ts`를 거친 import가 실제 정의에 닿게 하기 위해서입니다.
+- [x] 이 PR에서 기획서 3장의 엣지 표(의존함에 파일 → 심볼, 속함에 심볼 → 파일)를 고칩니다. #20이 아직 병합되지 않았으면 그 PR이 고치려던 4장 컴파일러의 정적 분석 단계와 6장 분석기 설명의 속함 엣지 문장도 함께 고칩니다.
 
 완료 기준: 분석용 고정 예제에서 기대한 심볼 노드와 엣지가 나옵니다. 블로그의 `features/note/index.ts`를 거친 import가 `features/note/lib/notes.ts`의 심볼에 닿습니다.
+
+정한 것: 클래스 멤버의 ID는 클래스 이름으로 짓습니다(`#Sender.send`). `export default class Sender`면 클래스는 `#default`, 멤버는 `#Sender.send`입니다. `export { helper as run }`처럼 내보내지 않은 선언을 다른 이름으로 내보내면 그 이름(`#run`)이 심볼이고, 그 선언 안에서 쓴 이름은 그 심볼의 의존입니다. 이름 전체를 가져온 것(`import * as core`)은 `core.charge`처럼 멤버로 쓴 곳만 그 멤버의 정의에 잇습니다. 같은 이름의 지역 변수가 가져온 이름을 가리는 경우는 구분하지 않아 의존이 더 잡힐 수 있습니다. `const { alert } = await import(...)` 같은 동적 import는 파일 의존만 만들고 심볼에는 잇지 않습니다.
+
+확인: 블로그에서 심볼 37개, 심볼 의존 32개가 나왔습니다. `app/notes/page.tsx#default`가 `features/note/index.ts`를 거쳐 `features/note/lib/notes.ts#getAllNotes`에, `features/note/components/TagFilter.tsx#TagFilter`가 `features/common/components/index.ts`를 거쳐 `features/common/components/Tag.tsx#Tag`에 닿습니다.
 
 정해야 할 것: 내보내지 않은 최상위 선언도 심볼로 만들지. 만들면 파일 안의 의존까지 보이지만 노드가 크게 늘어납니다. 1\~5번은 내보낸 이름만으로 진행합니다.
 

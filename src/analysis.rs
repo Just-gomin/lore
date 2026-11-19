@@ -3,13 +3,14 @@
 //! tree-sitter로 파싱하며 네트워크를 쓰지 않는다. 같은 파일 목록과 내용에서는 같은 결과를 낸다.
 //! 분석은 추론이라, 문법 오류가 있는 파일과 해석하지 못한 경로는 빌드를 막지 않고 보고만 한다.
 
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::path::Path;
 
 use serde::Serialize;
 use tree_sitter::{Language, Node, Parser};
 
 use crate::resolve::{Resolution, Resolver};
+use crate::symbols::{self, FileSymbols};
 
 /// 분석하는 확장자. `.d.ts`는 선언만 있어 뺀다.
 const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
@@ -26,6 +27,10 @@ pub struct AnalysisReport {
     pub parse_errors: Vec<String>,
     /// 레포 안을 가리키지만 파일에 잇지 못한 import 수. 레포 밖 패키지는 세지 않는다.
     pub unresolved: usize,
+    /// 만든 심볼 노드 수.
+    pub symbols: usize,
+    /// 만든 심볼 의존 엣지 수(심볼 → 심볼, 파일 → 심볼).
+    pub symbol_edges: usize,
 }
 
 /// 분석한 파일과 파일 → 파일 의존. 둘 다 정렬되어 있다.
@@ -34,6 +39,10 @@ pub struct Analysis {
     pub files: Vec<String>,
     /// (import하는 파일, import되는 파일)
     pub edges: Vec<(String, String)>,
+    /// 심볼 ID(`파일경로#이름`) → 담은 파일
+    pub symbols: Vec<(String, String)>,
+    /// (쓰는 심볼이나 파일, 쓰이는 심볼)
+    pub symbol_edges: Vec<(String, String)>,
     pub report: AnalysisReport,
 }
 
@@ -65,15 +74,18 @@ pub fn analyze(root: &Path, tracked: &[String], workspace: bool) -> Analysis {
     };
     let mut edges = BTreeSet::new();
     let mut parser = Parser::new();
+    let mut file_symbols: BTreeMap<String, FileSymbols> = BTreeMap::new();
     for file in &files {
         let Ok(text) = std::fs::read_to_string(root.join(file)) else {
             report.parse_errors.push(file.clone());
             continue;
         };
-        let Some((specifiers, had_error)) = module_specifiers(&mut parser, file, &text) else {
+        let Some(parsed) = parse(&mut parser, file, &text) else {
             report.parse_errors.push(file.clone());
             continue;
         };
+        let (specifiers, had_error) = (parsed.specifiers, parsed.had_error);
+        file_symbols.insert(file.clone(), parsed.symbols);
         if had_error {
             report.parse_errors.push(file.clone());
         }
@@ -89,11 +101,40 @@ pub fn analyze(root: &Path, tracked: &[String], workspace: bool) -> Analysis {
         }
     }
     report.edges = edges.len();
+    let resolve = |from: &str, module: &str| match resolver.resolve(from, module) {
+        Resolution::File(target) => Some(target),
+        _ => None,
+    };
+    let linked = symbols::link(&file_symbols, &resolve);
+    report.symbols = linked.symbols.len();
+    report.symbol_edges = linked.edges.len();
     Analysis {
         files,
         edges: edges.into_iter().collect(),
+        symbols: linked.symbols.into_iter().collect(),
+        symbol_edges: linked.edges.into_iter().collect(),
         report,
     }
+}
+
+/// 파일 하나를 파싱한 결과.
+struct Parsed {
+    specifiers: Vec<String>,
+    had_error: bool,
+    symbols: FileSymbols,
+}
+
+fn parse(parser: &mut Parser, path: &str, text: &str) -> Option<Parsed> {
+    parser.set_language(&language(path)).ok()?;
+    let tree = parser.parse(text, None)?;
+    let root = tree.root_node();
+    let mut specifiers = Vec::new();
+    collect(root, text.as_bytes(), &mut specifiers);
+    Some(Parsed {
+        specifiers,
+        had_error: root.has_error(),
+        symbols: symbols::extract(root, text.as_bytes()),
+    })
 }
 
 fn language(path: &str) -> Language {
@@ -108,13 +149,10 @@ fn language(path: &str) -> Language {
 ///
 /// 정적 import, `export ... from`, 문자열 상수를 받는 `require()`와 `import()`를 읽는다.
 /// 문법 오류로 읽은 곳(`ERROR` 노드) 안은 보지 않는다.
+#[cfg(test)]
 fn module_specifiers(parser: &mut Parser, path: &str, text: &str) -> Option<(Vec<String>, bool)> {
-    parser.set_language(&language(path)).ok()?;
-    let tree = parser.parse(text, None)?;
-    let root = tree.root_node();
-    let mut found = Vec::new();
-    collect(root, text.as_bytes(), &mut found);
-    Some((found, root.has_error()))
+    let parsed = parse(parser, path, text)?;
+    Some((parsed.specifiers, parsed.had_error))
 }
 
 /// 트리를 돌며 모듈 경로를 모은다. 깊이 중첩된 코드(긴 문자열 이어 붙이기 등)에서 스택이 넘치지 않게

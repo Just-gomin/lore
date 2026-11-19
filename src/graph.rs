@@ -247,14 +247,41 @@ pub fn add_analysis(graph: &mut Graph, root: &Path, analysis: &crate::analysis::
         graph.nodes.push(file_node(root, file));
     }
     graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
-    graph
-        .edges
-        .extend(analysis.edges.iter().map(|(src, dst)| Edge {
-            src: src.clone(),
-            dst: dst.clone(),
-            kind: EdgeKind::DependsOn,
-            origin: ORIGIN_ANALYSIS,
-        }));
+    for (id, file) in &analysis.symbols {
+        let (_, name) = id.split_once('#').unwrap_or((file, id));
+        graph.nodes.push(Node {
+            id: id.clone(),
+            kind: "symbol",
+            title: Some(name.to_string()),
+            summary: None,
+            status: None,
+            source_path: file.clone(),
+            content_hash: String::new(),
+            frontmatter: None,
+            body: None,
+        });
+    }
+    graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    let edge = |src: &String, dst: &String, kind| Edge {
+        src: src.clone(),
+        dst: dst.clone(),
+        kind,
+        origin: ORIGIN_ANALYSIS,
+    };
+    graph.edges.extend(
+        analysis
+            .edges
+            .iter()
+            .chain(&analysis.symbol_edges)
+            .map(|(src, dst)| edge(src, dst, EdgeKind::DependsOn)),
+    );
+    // 심볼은 담은 파일에 속한다.
+    graph.edges.extend(
+        analysis
+            .symbols
+            .iter()
+            .map(|(id, file)| edge(id, file, EdgeKind::BelongsTo)),
+    );
     graph.edges.sort();
     graph.edges.dedup();
 }
