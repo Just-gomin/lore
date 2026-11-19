@@ -201,7 +201,7 @@ impl Request {
 
 /// `lore add decision|incident`의 인자를 읽는다.
 fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
-    let one = |id: &str| matches.get_one::<String>(id).cloned();
+    let one = |id: &str| matches.try_get_one::<String>(id).ok().flatten().cloned();
     let many = |id: &str| -> Vec<String> {
         matches
             .try_get_many::<String>(id)
@@ -212,10 +212,10 @@ fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
             .cloned()
             .collect()
     };
-    let kind = if name == DECISION {
-        Kind::Decision
-    } else {
-        Kind::Incident
+    let kind = match name {
+        DECISION => Kind::Decision,
+        SPEC => Kind::Spec,
+        _ => Kind::Incident,
     };
     NewRecord {
         kind,
@@ -242,6 +242,14 @@ fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
             .cloned()
             .unwrap_or_else(|| "inferred".to_string()),
         decisions: many(DECISIONS),
+        paths: many(PATHS),
+        tests: many(TESTS),
+        depends_on: many(DEPENDS_ON),
+        parent: matches
+            .try_get_one::<String>(PARENT)
+            .ok()
+            .flatten()
+            .cloned(),
     }
 }
 
@@ -260,6 +268,11 @@ const HOP: &str = "hop";
 const EDGES: &str = "edges";
 const DECISION: &str = "decision";
 const INCIDENT: &str = "incident";
+const SPEC: &str = "spec";
+const PATHS: &str = "paths";
+const TESTS: &str = "tests";
+const DEPENDS_ON: &str = "depends-on";
+const PARENT: &str = "parent";
 const SLUG: &str = "slug";
 const TITLE: &str = "title";
 const SPECS: &str = "specs";
@@ -389,6 +402,30 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                         .default_value("inferred"),
                 ),
             record_command(INCIDENT, "사고 기록 추가").arg(list_arg(DECISIONS)),
+            // 글롭에는 중괄호(`{a,b}`)가 들어갈 수 있어 쉼표로 나누지 않고 여러 번 받습니다.
+            clap::Command::new(SPEC)
+                .about("기능 스펙 추가")
+                .arg(
+                    Arg::new(SLUG)
+                        .long(SLUG)
+                        .required(true)
+                        .value_parser(parse_slug),
+                )
+                .arg(Arg::new(TITLE).long(TITLE).required(true))
+                .arg(
+                    Arg::new(PATHS)
+                        .long(PATHS)
+                        .value_name("글롭")
+                        .action(ArgAction::Append),
+                )
+                .arg(
+                    Arg::new(TESTS)
+                        .long(TESTS)
+                        .value_name("글롭")
+                        .action(ArgAction::Append),
+                )
+                .arg(list_arg(DEPENDS_ON))
+                .arg(Arg::new(PARENT).long(PARENT)),
             clap::Command::new(SOURCE)
                 .about("소스 노트 추가")
                 .arg(Arg::new(FROM).long(FROM).value_name("JSON 파일"))
@@ -541,6 +578,10 @@ mod tests {
                         status: "accepted".to_string(),
                         confidence: "inferred".to_string(),
                         decisions: Vec::new(),
+                        paths: Vec::new(),
+                        tests: Vec::new(),
+                        depends_on: Vec::new(),
+                        parent: None,
                     })),
                 ),
                 Command::Uninstall => (

@@ -1,4 +1,4 @@
-//! `lore add decision`, `lore add incident`: 내장 템플릿으로 기록 파일을 만들고 ID를 발급한다.
+//! `lore add decision`, `lore add incident`, `lore add spec`: 내장 템플릿으로 문서 파일을 만들고 ID를 발급한다.
 //!
 //! 본문은 템플릿의 제목만 둔다. 본문을 채우는 것은 에이전트다.
 
@@ -11,11 +11,12 @@ use crate::source::{self, Kind};
 
 const DECISION_BODY: &str = include_str!("../templates/decision.md");
 const INCIDENT_BODY: &str = include_str!("../templates/incident.md");
+const SPEC_BODY: &str = include_str!("../templates/spec.md");
 
 /// 만들 기록. 인자 해석이 끝난 값이다.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewRecord {
-    /// [`Kind::Decision`] 또는 [`Kind::Incident`]
+    /// [`Kind::Decision`], [`Kind::Incident`], [`Kind::Spec`]
     pub kind: Kind,
     pub slug: String,
     pub title: String,
@@ -31,6 +32,12 @@ pub struct NewRecord {
     pub confidence: String,
     /// 사고만.
     pub decisions: Vec<String>,
+    /// 스펙만. 이 스펙이 맡는 코드와 테스트의 글롭.
+    pub paths: Vec<String>,
+    pub tests: Vec<String>,
+    /// 스펙만.
+    pub depends_on: Vec<String>,
+    pub parent: Option<String>,
 }
 
 /// 추가 결과. JSON 출력이 된다.
@@ -50,12 +57,15 @@ pub fn today() -> String {
 }
 
 pub fn add(config: &Config, record: &NewRecord) -> Result<AddReport, LoreError> {
-    let date = record.date.clone().unwrap_or_else(today);
-    let prefix = match record.kind {
-        Kind::Decision => "ADR",
-        _ => "INC",
+    // 스펙의 ID는 날짜 없이 슬러그 그대로입니다. 지금 스펙의 ID 규칙과 같습니다.
+    let id = match record.kind {
+        Kind::Spec => record.slug.clone(),
+        kind => {
+            let date = record.date.clone().unwrap_or_else(today);
+            let prefix = if kind == Kind::Decision { "ADR" } else { "INC" };
+            format!("{prefix}-{}-{}", date.replace('-', ""), record.slug)
+        }
     };
-    let id = format!("{prefix}-{}-{}", date.replace('-', ""), record.slug);
     let path = format!("{}/{}/{id}.md", config.docs, record.kind.folder());
 
     // 레포의 다른 문서에 있는 문제는 새 기록을 막지 않는다.
@@ -126,6 +136,15 @@ fn render(record: &NewRecord, id: &str) -> String {
                 record.confidence
             ));
             DECISION_BODY
+        }
+        Kind::Spec => {
+            text.push_str(&format!("paths: {}\n", list(&record.paths)));
+            text.push_str(&format!("tests: {}\n", list(&record.tests)));
+            text.push_str(&format!("depends_on: {}\n", list(&record.depends_on)));
+            if let Some(parent) = &record.parent {
+                text.push_str(&format!("parent: {}\n", scalar(parent)));
+            }
+            SPEC_BODY
         }
         _ => {
             text.push_str(&format!(

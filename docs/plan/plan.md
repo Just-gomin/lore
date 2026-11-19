@@ -440,9 +440,10 @@ lore add decision --slug <슬러그> --title <제목> [--specs <ID,...>] [--sour
                   [--supersedes <ID>] [--status proposed|accepted] [--confidence stated|inferred] [--date YYYY-MM-DD]
 lore add incident --slug <슬러그> --title <제목> [--specs <ID,...>] [--decisions <ID,...>] [--sources <...>] [--date YYYY-MM-DD]
 lore add source [--from <JSON 파일>]
+lore add spec --slug <ID> --title <제목> [--paths <글롭>]... [--tests <글롭>]... [--depends-on <ID,...>] [--parent <ID>]
 ```
 
-종류에 맞는 내장 템플릿으로 문서 파일을 만들고 ID를 발급합니다. ID의 날짜는 `--date`, 없으면 실행 환경의 오늘입니다. 결정은 기본이 `status: accepted`, `confidence: inferred`입니다. 새 문서가 없는 문서를 가리키거나 같은 ID가 있으면 파일을 만들지 않고, 레포의 다른 문서에 있는 문제는 막지 않습니다. 에이전트는 작업 세션의 내용으로 본문을 채우고, `--from`은 소스 노트의 입력 JSON 파일을 받습니다. 추가된 파일은 코드 변경과 같은 PR에서 승인받습니다.
+종류에 맞는 내장 템플릿으로 문서 파일을 만들고 ID를 발급합니다. 스펙의 ID는 날짜 없이 슬러그 그대로입니다. 스펙의 `--paths`, `--tests`는 글롭에 쉼표가 들어갈 수 있어 여러 번 줍니다. ID의 날짜는 `--date`, 없으면 실행 환경의 오늘입니다. 결정은 기본이 `status: accepted`, `confidence: inferred`입니다. 새 문서가 없는 문서를 가리키거나 같은 ID가 있으면 파일을 만들지 않고, 레포의 다른 문서에 있는 문제는 막지 않습니다. 에이전트는 작업 세션의 내용으로 본문을 채우고, `--from`은 소스 노트의 입력 JSON 파일을 받습니다. 추가된 파일은 코드 변경과 같은 PR에서 승인받습니다.
 
 템플릿은 `lore` 바이너리에 들어 있고 레포에는 두지 않습니다. 파일을 만드는 쪽과 머리말 형식을 검사하는 쪽이 같은 버전의 템플릿을 쓰게 하기 위해서입니다. 프로젝트가 본문 구성을 바꾸는 덮어쓰기는 필요해질 때 추가합니다. `lore add`가 나오기 전에는 `docs/_templates/`에 같은 템플릿을 두고 손으로 복사해 씁니다.
 
