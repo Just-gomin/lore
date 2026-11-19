@@ -264,3 +264,32 @@ fn 예전_버전이_설치하고_고치지_않은_워크플로는_새_버전으�
         lore::install::installed_workflow()
     );
 }
+
+#[test]
+fn init을_주면_lore_init_스킬을_설치하고_판단이_드는_검사를_꺼_둔다() {
+    let dir = empty_repo();
+    let report = json(&lore_in(dir.path(), &["install", "--init"]));
+    for name in ["lore-init-channels", "lore-init-collect", "lore-init-draft"] {
+        let path = format!(".claude/skills/{name}/SKILL.md");
+        assert!(
+            changes(&report).contains(&(path.clone(), "created".to_string())),
+            "{path}"
+        );
+    }
+    let config = read(dir.path(), "lore.config.yaml");
+    assert!(config.contains("\n  scope: []\n"), "{config}");
+
+    // --init 없이 설치하면 init 스킬도 check.scope도 없다.
+    let plain = empty_repo();
+    assert!(lore_in(plain.path(), &["install"]).status.success());
+    assert!(!plain.path().join(".claude/skills/lore-init-draft").exists());
+    assert!(!read(plain.path(), "lore.config.yaml").contains("scope:"));
+
+    // 걷어내면 init 스킬도 지운다.
+    let report = json(&lore_in(dir.path(), &["uninstall"]));
+    assert!(changes(&report).contains(&(
+        ".claude/skills/lore-init-draft/SKILL.md".to_string(),
+        "removed".to_string()
+    )));
+    assert!(!dir.path().join(".claude").exists());
+}

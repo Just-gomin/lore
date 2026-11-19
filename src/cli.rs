@@ -116,6 +116,8 @@ pub enum Request {
         skills: bool,
         /// `--no-ci`면 거짓이다.
         ci: bool,
+        /// `--init`: `lore init` 스킬도 설치한다.
+        init: bool,
     },
     Init {
         /// 진행 상태를 볼 폴더. 없으면 프로젝트 홈 전체다.
@@ -179,6 +181,7 @@ impl Request {
                 dry_run: matches.get_flag(DRY_RUN),
                 skills: !matches.get_flag(NO_SKILLS),
                 ci: !matches.get_flag(NO_CI),
+                init: matches.get_flag(INIT),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -292,6 +295,7 @@ const REPORT: &str = "report";
 const SCOPE: &str = "scope";
 const NO_SKILLS: &str = "no-skills";
 const NO_CI: &str = "no-ci";
+const INIT: &str = "init";
 const WITH_CONFIG: &str = "with-config";
 
 fn parse_slug(value: &str) -> Result<String, String> {
@@ -385,7 +389,8 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(NO_SKILLS)
                     .action(ArgAction::SetTrue),
             )
-            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue)),
+            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue))
+            .arg(Arg::new(INIT).long(INIT).action(ArgAction::SetTrue)),
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -597,6 +602,7 @@ mod tests {
                         dry_run: false,
                         skills: true,
                         ci: true,
+                        init: false,
                     },
                 ),
                 Command::Init => (

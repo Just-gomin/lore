@@ -46,7 +46,7 @@
 | `connectors/common/` | 커넥터가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석 |
 | `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `connectors/github/` | `lore-connector-github`: GitHub PR과 이슈에서 후보 뽑기, 최신 판 목록 |
-| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬, 워크플로 |
+| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬(`lore init` 스킬 포함), 워크플로 |
 | `.github/workflows/` | 이 레포의 CI(`ci.yaml`)와 태그를 올리면 바이너리를 올리는 릴리스(`release.yaml`) |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |

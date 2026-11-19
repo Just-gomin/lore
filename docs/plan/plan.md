@@ -314,7 +314,7 @@ CLI 자체는 CI에 묶이지 않습니다. 다른 CI로 옮길 때는 워크플
 ### lore install
 
 ```
-lore install [--dry-run] [--no-skills] [--no-ci]
+lore install [--dry-run] [--no-skills] [--no-ci] [--init]
 ```
 
 프로젝트에 lore로 작업하는 방법을 심는 명령입니다. 네트워크와 LLM 없이 동작하며, 여러 번 실행해도 결과가 같습니다. 새 프로젝트는 이 명령만으로 충분하고, 기존 코드가 있는 프로젝트는 이어서 `lore init`을 실행합니다.
@@ -323,6 +323,7 @@ lore install [--dry-run] [--no-skills] [--no-ci]
 - **도구별 파일**: `CLAUDE.md`, `GEMINI.md`가 있으면 같은 표식 안에 `AGENTS.md`의 lore 구간을 따르라는 한 줄만 넣습니다. 없는 파일은 만들지 않습니다. 본문은 `AGENTS.md` 한 곳에만 둡니다.
 - **설정과 문서 뼈대**: `lore.config.yaml`과 `docs/` 폴더 구조가 없으면 만듭니다.
 - **스킬과 CI**: 에이전트 스킬 파일(`.claude/skills/lore-record/SKILL.md`, `.claude/skills/lore-source/SKILL.md`, `.claude/skills/lore-sync/SKILL.md`)과 `lore check`를 실행하는 GitHub Actions 워크플로를 설치합니다. `--no-skills`, `--no-ci`로 끌 수 있습니다. 사람이 고친 스킬은 덮어쓰지 않습니다.
+- **기존 프로젝트**: `--init`을 주면 `lore init`의 세 스킬(`lore-init-channels`, `lore-init-collect`, `lore-init-draft`)도 설치하고, 새로 만드는 설정에 `check.scope: []`를 넣어 `lore init`을 마치기 전에는 판단이 드는 검사가 아무 파일도 보지 않게 합니다. 신규 프로젝트는 `--init` 없이 설치합니다.
 
 ```markdown
 <!-- lore:begin v1 -->
@@ -421,7 +422,7 @@ check:
     - features/**
 ```
 
-`channels`의 `id`는 `lore add source` 입력의 `channel` 값과 짝을 이룹니다. `sensitivity`는 `normal`, `sensitive`, `excluded` 중 하나이며, 여기에 없는 채널은 민감으로 다룹니다. `tool`은 그 채널의 수집 경로로, 커넥터 실행 파일 이름, `agent`(에이전트 도구), `file`(파일 가져오기) 중 하나입니다. 코어는 `lore init`에서 보여 주기만 하고, 스킬이 읽고 그 경로로 수집합니다.
+`channels`의 `id`는 `lore add source` 입력의 `channel` 값과 짝을 이룹니다. `sensitivity`는 `normal`, `sensitive`, `excluded` 중 하나이며, 여기에 없는 채널은 민감으로 다룹니다. `tool`은 그 채널의 수집 경로로, 커넥터 실행 파일 이름, `agent`(에이전트 도구), `file`(파일 가져오기) 중 하나입니다. 코어는 `lore init`에서 보여 주기만 하고, 스킬이 읽고 그 경로로 수집합니다. `scope`는 포함할 대화방, 폴더, 기간을 사람이 읽는 글로 적는 곳이며 코어는 읽지 않습니다.
 
 `check.ignore`는 `lore check`의 매핑 누락 검사에서 뺄 파일의 글롭입니다. 문서, 설정, 이미지처럼 코드가 아니라 맡을 스펙이 없는 파일을 적습니다.
 
@@ -669,7 +670,7 @@ npm 패키지로 설치하면 버전이 lockfile에 고정되어 팀원과 CI가
 | 수집의 책임 경계 | 채널 수집은 lore 밖의 프로젝트별 도구가 맡음. lore는 lore add source의 입력 형식과, 기본으로 함께 내는 git·GitHub 커넥터의 출력 형식(후보, 최신 판)을 정함. 코어는 커넥터를 실행하지 않음. 설계 단계에서 에이전트가 관련 자료를 물음 | 프로젝트마다 소통 방식이 달라서. 사람의 기억에 기대면 수집이 끊겨서 | 여러 프로젝트가 같은 수집 도구를 반복해 만들게 될 때 |
 | lore add source 입력 형식 | JSON 한 가지(표준 입력 또는 --from JSON 파일), 한 번에 한 건. slug는 호출하는 쪽이 영문으로 넘김. 같은 origin이 있으면 기존 노트를 갱신 | 정제는 lore 밖에서 끝나야 lore가 결정적으로 동작해서. 원본 하나에 소스 노트 하나여야 신선도 검사가 단순해서 | 한 번에 수십 건을 넣는 일이 잦아질 때(배열 입력 추가) |
 | 설정 파일 형식과 사이드 프로젝트 | 설정은 lore.config.yaml(YAML). 1\~4단계는 개인 블로그 레포에서 검증하며 채널은 GitHub, git 이력, 기존 계획 문서 세 가지 | YAML이 익숙하고 주석을 달 수 있어서. 블로그가 Node.js와 pnpm 구성이라 첫 분석 대상과 같아서 | 설정 항목이 늘어 한 파일로 다루기 어려워질 때 |
-| 설치 명령 | lore install이 안내문, 설정, 문서 뼈대, 스킬, CI 워크플로를 설치. 안내문 본문은 AGENTS.md의 표식 구간 한 곳, 도구별 파일은 가리키는 한 줄. install이 먼저, init은 그 뒤 선택. 구간이 lore 버전과 다르면 lore check가 막음. 제거는 별도 명령 lore uninstall이 맡고 기록은 항상 남기며 설정은 옵션을 줄 때만 지움 | 설치를 한 명령으로 끝내기 위해. 파일마다 복제하면 버전이 어긋나서. 새 프로젝트는 이력 확보가 필요 없어서 | AGENTS.md를 읽지 않는 도구를 지원해야 할 때 |
+| 설치 명령 | lore install이 안내문, 설정, 문서 뼈대, 스킬, CI 워크플로를 설치. 안내문 본문은 AGENTS.md의 표식 구간 한 곳, 도구별 파일은 가리키는 한 줄. install이 먼저, init은 그 뒤 선택. 기존 프로젝트는 `lore install --init`으로 init 스킬까지 설치. 구간이 lore 버전과 다르면 lore check가 막음. 제거는 별도 명령 lore uninstall이 맡고 기록은 항상 남기며 설정은 옵션을 줄 때만 지움 | 설치를 한 명령으로 끝내기 위해. 파일마다 복제하면 버전이 어긋나서. 새 프로젝트는 이력 확보가 필요 없어서 | AGENTS.md를 읽지 않는 도구를 지원해야 할 때 |
 | 템플릿의 위치 | 템플릿은 lore 바이너리에 내장. lore add가 나오기 전에만 docs/\_templates/를 임시로 씀 | 레포의 템플릿이 lore 버전과 어긋나는 것을 막기 위해 | 프로젝트별로 본문 구성을 바꿔야 할 때(덮어쓰기 추가) |
 | 결정 기록의 이유 서술 | 결정 기록 본문에 이유를 적음. 소스 노트 없이도 이해되어야 함 | 민감 등급 소스 노트는 내용이 없어 에이전트가 이유를 읽을 수 없어서 | 이유를 적다가 민감한 내용이 결정 기록에 새는 일이 생길 때 |
 | 대상 규모 | 1인 이상의 개발팀이면 규모와 무관하게 사용 | 레포 안의 파일과 단일 바이너리라 팀 크기에 기대는 부분이 없어서 | 여러 레포가 지식을 공유해야 하거나, 디비가 커져 내려받기 부담스러울 때 |
