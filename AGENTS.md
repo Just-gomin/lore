@@ -4,7 +4,7 @@
 
 ## 먼저 읽을 문서
 
-- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른두 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
+- [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른세 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
 - [`docs/plan/stage-4.md`](docs/plan/stage-4.md): 지금 하고 있는 4단계의 작업 순서와 완료 기준입니다. 끝난 단계는 [`stage-2.md`](docs/plan/stage-2.md), [`stage-3.md`](docs/plan/stage-3.md)에 있습니다. 다음 단계는 [`stage-5.md`](docs/plan/stage-5.md)이며, 4단계의 경고 운영이 끝나기 전에 미리 썼습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
@@ -42,6 +42,7 @@
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
 | `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `src/sync.rs`        | `lore sync`: 이름 변경에 맞춰 스펙의 경로 고치기     |
+| `src/init.rs`        | `lore init`: 기존 프로젝트 도입의 진행 상태          |
 | `connectors/common/` | 커넥터가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석 |
 | `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `connectors/github/` | `lore-connector-github`: GitHub PR과 이슈에서 후보 뽑기, 최신 판 목록 |
@@ -59,6 +60,7 @@
 | `tests/skills.rs`    | 스킬과 안내문의 명령 예시가 해석되는지 확인          |
 | `tests/check.rs`     | 고정 예제로 `lore check`를 확인하는 테스트           |
 | `tests/sync.rs`      | 고정 예제로 `lore sync`를 확인하는 테스트            |
+| `tests/init.rs`      | 고정 예제로 `lore init`을 확인하는 테스트            |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |

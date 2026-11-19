@@ -15,6 +15,7 @@ pub mod git;
 pub mod graph;
 pub mod impact;
 pub mod index;
+pub mod init;
 pub mod install;
 pub mod output;
 pub mod query;
@@ -119,6 +120,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
                 config::discover(cwd).and_then(|config| check::check(&config, &options))
             })
             .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
+        Request::Init { scope } => config::discover(cwd)
+            .and_then(|config| init::init(&config, cwd, scope.as_deref()))
+            .map(|report| output::success(&report, for_human, init::render)),
         Request::Sync { base, dry_run } => config::discover(cwd)
             .and_then(|config| sync::sync(&config, &base, dry_run))
             .map(|report| output::success(&report, for_human, sync::render)),

@@ -56,7 +56,7 @@ impl Command {
         match self {
             Command::Install => "설정 파일, 문서 뼈대, 에이전트 안내문, 스킬, CI 워크플로 설치",
             Command::Uninstall => "설치한 안내문 구간, 스킬, CI 워크플로 제거",
-            Command::Init => "기존 이력 확보와 첫 디비 구축",
+            Command::Init => "기존 프로젝트 도입의 진행 상태",
             Command::Add => "결정, 사고, 소스 노트 추가",
             Command::Why => "코드나 기능의 배경 조회",
             Command::Impact => "변경의 영향 범위 파악",
@@ -116,6 +116,10 @@ pub enum Request {
         skills: bool,
         /// `--no-ci`면 거짓이다.
         ci: bool,
+    },
+    Init {
+        /// 진행 상태를 볼 폴더. 없으면 프로젝트 홈 전체다.
+        scope: Option<String>,
     },
     Sync {
         /// 비교 기준 ref.
@@ -186,11 +190,13 @@ impl Request {
                 Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
                 None => Request::Pending(Command::Add),
             },
+            Command::Init => Request::Init {
+                scope: matches.get_one::<String>(SCOPE).cloned(),
+            },
             Command::Sync => Request::Sync {
                 base: matches.get_one::<String>(BASE).cloned().unwrap_or_default(),
                 dry_run: matches.get_flag(DRY_RUN),
             },
-            other => Request::Pending(other),
         }
     }
 }
@@ -272,6 +278,7 @@ const ORIGINS: &str = "origins";
 const BASE: &str = "base";
 const PR_BODY: &str = "pr-body";
 const REPORT: &str = "report";
+const SCOPE: &str = "scope";
 const NO_SKILLS: &str = "no-skills";
 const NO_CI: &str = "no-ci";
 const WITH_CONFIG: &str = "with-config";
@@ -356,6 +363,7 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(WITH_CONFIG)
                     .action(ArgAction::SetTrue),
             ),
+        Command::Init => definition.arg(Arg::new(SCOPE).long(SCOPE).value_name("폴더")),
         Command::Sync => definition
             .arg(Arg::new(BASE).long(BASE).required(true).value_name("ref"))
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue)),
@@ -552,6 +560,12 @@ mod tests {
                         ci: true,
                     },
                 ),
+                Command::Init => (
+                    vec!["init", "--scope", "server"],
+                    Request::Init {
+                        scope: Some("server".to_string()),
+                    },
+                ),
                 Command::Sync => (
                     vec!["sync", "--base", "main", "--dry-run"],
                     Request::Sync {
@@ -559,7 +573,6 @@ mod tests {
                         dry_run: true,
                     },
                 ),
-                other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
                 parse(&args(&argv)),
