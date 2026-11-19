@@ -1,7 +1,8 @@
 //! 추출기와 코어를 잇는 통합 확인: 엑셀 파일 → 추출기 → `lore add source` → 결정 → `lore why --depth source`.
 //!
 //! 추출기와 코어 크레이트는 서로 의존하지 않으므로, `cargo test --workspace`가 함께 빌드한 추출기 실행 파일을
-//! 이 테스트 실행 파일 옆 폴더(`target/<프로필>/`)에서 찾아 부른다.
+//! 이 테스트 실행 파일 옆 폴더(`target/<프로필>/`)에서 찾아 부른다. `--workspace`가 그 실행 파일을 빌드하는 것은
+//! `extractors/xlsx`에 통합 테스트가 있어서다. `cargo test -p lore`만 돌리면 전에 빌드한 실행 파일을 쓰거나 건너뛴다.
 
 mod common;
 
@@ -10,6 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use common::{json, lore_in, lore_with_input, repo};
+use sha2::Digest;
 
 /// `target/<프로필>/lore-extractor-xlsx`. 이 테스트 실행 파일은 `target/<프로필>/deps/`에 있다.
 fn extractor() -> Option<PathBuf> {
@@ -55,10 +57,20 @@ fn 엑셀_회의_자료가_소스_노트를_거쳐_결정에_연결된다() {
         .write_all(input.to_string().as_bytes())
         .unwrap();
     let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
     let extracted: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let mut candidate = extracted["candidates"][0].clone();
     assert!(candidate["text"].as_str().unwrap().contains("재시도 횟수"));
+    // 원본의 판은 파일 내용의 sha256이다(`shasum -a 256`과 같은 값).
+    let digest: String = sha2::Sha256::digest(std::fs::read(&file).unwrap())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(candidate["origin_version"], digest);
 
     // 2. 정제: 스킬이 할 일을 테스트가 정한 글로 대신한다.
     let object = candidate.as_object_mut().unwrap();
@@ -68,14 +80,16 @@ fn 엑셀_회의_자료가_소스_노트를_거쳐_결정에_연결된다() {
         "body".into(),
         "- 회의 자료의 표에서 재시도 횟수를 3회로 적음\n".into(),
     );
-    let added = lore_with_input(
-        dir.path(),
-        &["add", "source"],
-        &serde_json::Value::Object(object.clone()).to_string(),
-    );
+    let note = serde_json::Value::Object(object.clone()).to_string();
+    let added = lore_with_input(dir.path(), &["add", "source"], &note);
     assert!(added.status.success(), "{}", common::stdout(&added));
-    let source = json(&added)["id"].as_str().unwrap().to_string();
+    let added = json(&added);
+    assert_eq!(added["change"], "created");
+    let source = added["id"].as_str().unwrap().to_string();
     assert_eq!(source, "SRC-20261103-retry-sheet");
+    // 같은 파일을 다시 넣으면 그대로다.
+    let again = json(&lore_with_input(dir.path(), &["add", "source"], &note));
+    assert_eq!(again["change"], "unchanged");
 
     // 3. 이 소스 노트를 근거로 한 결정
     let decision = lore_in(
