@@ -121,7 +121,7 @@ pub fn impact(
     hop: u32,
     edges: &[EdgeKind],
 ) -> Result<ImpactReport, LoreError> {
-    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input, true)?;
+    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input)?;
     let mut edges = edges.to_vec();
     edges.sort();
     edges.dedup();
