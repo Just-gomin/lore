@@ -5,7 +5,7 @@ use serde::Serialize;
 use crate::cli::Command;
 use crate::error::LoreError;
 
-/// 사용법이 잘못됐거나 아직 구현되지 않은 명령일 때의 종료 코드.
+/// 사용법이 잘못됐거나 없는 명령일 때의 종료 코드.
 pub const EXIT_USAGE: u8 = 2;
 
 /// 명령 하나를 실행한 결과.
