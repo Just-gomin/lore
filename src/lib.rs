@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod add_source;
+pub mod analysis;
 pub mod build;
 pub mod check;
 pub mod cli;

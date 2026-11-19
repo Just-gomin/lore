@@ -30,6 +30,7 @@
 | `src/source.rs`      | 소스 폴더를 훑어 종류별로 읽고 참조를 검사           |
 | `src/git.rs`         | 추적 파일 목록, 현재 커밋, 작업 트리 상태            |
 | `src/graph.rs`       | 소스와 파일로 노드와 엣지 계산                       |
+| `src/analysis.rs`    | 정적 분석: JS·TS의 import로 파일 → 파일 의존         |
 | `src/db.rs`          | SQLite 스키마와 쓰기                                 |
 | `src/index.rs`       | `docs/INDEX.md` 본문 만들기                          |
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
@@ -51,6 +52,7 @@
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
+| `tests/analysis.rs`  | 분석용 고정 예제로 정적 분석을 확인하는 테스트       |
 | `tests/index.rs`     | 고정 예제로 `docs/INDEX.md` 생성을 확인하는 테스트   |
 | `tests/why.rs`       | 고정 예제로 `lore why` 조회를 확인하는 테스트        |
 | `tests/add.rs`       | 고정 예제로 `lore add`(결정, 사고, 스펙)를 확인하는 테스트 |
@@ -63,7 +65,7 @@
 | `tests/init.rs`      | 고정 예제로 `lore init`을 확인하는 테스트            |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
-| `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |
+| `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력, `analysis`는 정적 분석용 |
 
 ## 작업 방법
 

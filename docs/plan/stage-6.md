@@ -39,7 +39,7 @@
 - 분석은 `lore.config.yaml`의 `analysis.language`가 있을 때만 합니다. 값은 `typescript`(TypeScript와 JavaScript를 함께 읽음) 하나이고, 모르는 값은 설정 오류입니다. `analysis.workspace`는 `pnpm`만 받습니다. 기본 설정 템플릿에는 넣지 않습니다. 블로그의 설정에는 이미 들어 있으므로, 분석을 켜는 일은 블로그에 새 버전을 설치하는 PR이 됩니다. 이 규칙을 1번 PR에서 기획서 5장 `lore.config` 파일 절에 적습니다.
 - 분석 대상은 git이 추적하는 `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs` 파일입니다(`.d.ts`는 뺌). 레포 밖의 패키지(npm 의존성)로 가는 import는 엣지를 만들지 않습니다.
 - 분석한 파일은 모두 파일 노드가 됩니다. 지금은 스펙이 맡는 파일만 노드인데, 그러면 스펙에 속하지 않은 파일을 거친 의존이 끊기기 때문입니다. 그래서 스펙에 속하지 않은 파일을 `lore why`, `lore impact`로 물으면 `target_not_found` 대신 스펙이 없는 결과가 나옵니다.
-- 파싱에 실패한 파일과 해석하지 못한 레포 안의 경로는 빌드를 막지 않습니다. `lore build` 출력의 `analysis`(분석한 파일 수, 엣지 수, 파싱하지 못한 파일, 해석하지 못한 import 수)에 냅니다. 분석이 꺼져 있으면 이 항목을 내지 않습니다. 분석은 추론이라 소스 문제(`Problem`)로 다루지 않습니다.
+- 문법 오류가 있는 파일과 해석하지 못한 레포 안의 경로는 빌드를 막지 않습니다. `lore build` 출력의 `analysis`(분석한 파일 수, 엣지 수, 문법 오류가 있는 파일 `parse_errors`, 해석하지 못한 import 수)에 냅니다. 문법 오류가 있는 파일도 오류가 난 곳 밖의 import는 씁니다(1번에서 정함). 분석이 꺼져 있으면 이 항목을 내지 않습니다. 분석은 추론이라 소스 문제(`Problem`)로 다루지 않습니다.
 - 모듈 경로는 상대 경로(`./`, `../`), 별칭(`tsconfig.json`의 `paths`에 맞는 것), 워크스페이스 패키지 이름, 그 밖의 것으로 나눕니다. 그 밖의 것은 레포 밖 패키지로 보고 엣지도 만들지 않고 세지도 않습니다. 해석하지 못한 import는 앞의 셋 중 파일에 잇지 못한 것입니다.
 - `lore check`는 분석하지 않습니다. 기계적 검사는 머리말과 파일 목록만으로 정해지고, CI가 PR마다 모든 코드를 파싱하지 않게 하기 위해서입니다.
 - 출력 형식을 바꾸는 PR은 `tests/cli.rs`, `tests/build.rs`의 기대값을 같은 PR에서 고칩니다(`AGENTS.md`).
@@ -56,10 +56,16 @@
 
 ### 1. 파일 의존
 
-- [ ] tree-sitter와 TypeScript, TSX, JavaScript 문법을 의존성으로 더하고, 정적 import, re-export(`export ... from`), 문자열 상수 `require("...")`와 `import("...")`의 모듈 경로를 뽑습니다.
-- [ ] 상대 경로를 TypeScript의 `bundler` 해석(`allowJs`)과 같은 규칙으로 파일에 잇습니다. 확장자가 없으면 `.ts`, `.tsx`, `.js`, `.jsx` 순서로 찾고, 폴더면 같은 순서로 `index` 파일을 찾습니다. 확장자가 있으면 그 파일을 먼저 찾고, 없을 때 `.js`는 `.ts`, `.tsx`로, `.jsx`는 `.tsx`로, `.mjs`는 `.mts`로, `.cjs`는 `.cts`로 바꿔 찾습니다.
-- [ ] `lore build`가 분석한 모든 파일을 파일 노드로, 파일 → 파일 의존함 엣지(생성 근거 `analysis`)를 디비에 쓰고, 출력에 `analysis`를 냅니다.
-- [ ] 이 PR에서 기획서 5장 `lore.config` 파일 절에 `analysis` 항목(값, 꺼져 있을 때의 동작)을 적습니다.
+- [x] tree-sitter와 TypeScript, TSX, JavaScript 문법을 의존성으로 더하고, 정적 import, re-export(`export ... from`), 문자열 상수 `require("...")`와 `import("...")`의 모듈 경로를 뽑습니다.
+- [x] 상대 경로를 TypeScript의 `bundler` 해석(`allowJs`)과 같은 규칙으로 파일에 잇습니다. 확장자가 없으면 `.ts`, `.tsx`, `.js`, `.jsx` 순서로 찾고, 폴더면 같은 순서로 `index` 파일을 찾습니다. 확장자가 있으면 그 파일을 먼저 찾고, 없을 때 `.js`는 `.ts`, `.tsx`로, `.jsx`는 `.tsx`로, `.mjs`는 `.mts`로, `.cjs`는 `.cts`로 바꿔 찾습니다.
+- [x] `lore build`가 분석한 모든 파일을 파일 노드로, 파일 → 파일 의존함 엣지(생성 근거 `analysis`)를 디비에 쓰고, 출력에 `analysis`를 냅니다.
+- [x] 이 PR에서 기획서 5장 `lore.config` 파일 절에 `analysis` 항목(값, 꺼져 있을 때의 동작)을 적습니다.
+
+정한 것: 문법 오류가 있는 파일도 버리지 않고, 오류로 읽은 곳(tree-sitter의 `ERROR` 노드) 밖의 import는 씁니다. 블로그에서 유효한 코드 두 파일이 오류로 읽혔기 때문입니다. JSX 글 속의 맨 `&`(`WHEN & WHERE`)와 타입 위치의 `typeof import("node:fs")`였습니다. 문법 크레이트 0.23.2가 가장 새 판이라 올려서 풀 수 없습니다. 그런 파일은 `parse_errors`에 남겨 알립니다.
+
+정한 것: 상대 경로가 git이 추적하는 코드가 아닌 파일(CSS, JSON, 이미지)을 가리키면 해석한 것으로 보고 엣지는 만들지 않습니다. 블로그 `app/layout.tsx`의 `import "./globals.css"`가 해석하지 못한 import로 세지던 것을 뺐습니다. 디비 `meta`에 `lore_version`을 적고 조회 전 신선도 판단에 넣었습니다.
+
+확인: 블로그에서 분석한 파일 37개, 파일 → 파일 의존 23개, 해석하지 못한 import 0개였습니다. 별칭(`@/`) import는 2번에서 해석합니다.
 
 완료 기준: 분석용 고정 예제에서 상대 경로 import가 기대한 파일 → 파일 엣지가 되고, 같은 커밋에서 두 번 빌드한 디비가 같습니다. 기존 고정 예제(`analysis` 없음)의 디비와 출력은 지금과 같습니다.
 

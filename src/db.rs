@@ -9,6 +9,8 @@ use crate::graph::Graph;
 
 /// 스키마가 바뀌면 올린다. 다른 버전의 디비는 다시 만든다.
 pub const SCHEMA_VERSION: &str = "1";
+/// 디비를 만든 lore의 버전. 분석기나 문법이 바뀌면 같은 작업 트리에서도 엣지가 달라지므로, 버전이 다르면 다시 만든다.
+pub const LORE_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 const SCHEMA: &str = "
 CREATE TABLE meta (
@@ -71,6 +73,7 @@ pub fn write(path: &Path, graph: &Graph, meta: &Meta) -> Result<(), LoreError> {
             .map_err(database_error)?;
         for (key, value) in [
             ("schema_version", SCHEMA_VERSION),
+            ("lore_version", LORE_VERSION),
             ("commit", meta.commit.as_str()),
             ("fingerprint", meta.fingerprint.as_str()),
         ] {
