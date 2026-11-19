@@ -1,4 +1,4 @@
-//! `lore add decision`, `lore add incident`가 고정 예제에 기록을 만드는 과정을 확인한다.
+//! `lore add decision`, `lore add incident`, `lore add spec`이 고정 예제에 문서를 만드는 과정을 확인한다.
 
 mod common;
 
@@ -165,4 +165,95 @@ fn 날짜를_주지_않으면_오늘로_발급한다() {
     ));
     let today = lore::add::today().replace('-', "");
     assert_eq!(report["id"], format!("ADR-{today}-log-level"));
+}
+
+#[test]
+fn 스펙을_슬러그_아이디로_만들고_빌드에_바로_쓰인다() {
+    let dir = repo("payment");
+    let output = lore_in(
+        dir.path(),
+        &[
+            "add",
+            "spec",
+            "--slug",
+            "payment-charge",
+            "--title",
+            "카드 승인",
+            "--paths",
+            "services/payment/core/{charge,refund}.ts",
+            "--tests",
+            "services/payment/core/**/*.test.ts",
+            "--depends-on",
+            "payment-retry",
+            "--parent",
+            "payment",
+        ],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert_eq!(
+        json(&output),
+        json!({
+            "ok": true,
+            "id": "payment-charge",
+            "kind": "feature",
+            "path": "docs/specs/payment-charge.md",
+        })
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docs/specs/payment-charge.md")).unwrap(),
+        "---
+id: payment-charge
+title: 카드 승인
+paths: [\"services/payment/core/{charge,refund}.ts\"]
+tests: [services/payment/core/**/*.test.ts]
+depends_on: [payment-retry]
+parent: payment
+---
+
+## 지금 동작
+"
+    );
+    assert!(lore_in(dir.path(), &["build"]).status.success());
+}
+
+#[test]
+fn 없는_상위_스펙을_가리키면_스펙을_만들지_않고_빈_목록은_그대로_적는다() {
+    let dir = repo("payment");
+    let output = lore_in(
+        dir.path(),
+        &[
+            "add", "spec", "--slug", "sms", "--title", "문자", "--parent", "notify",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(json(&output)["error"]["problems"][0]["field"], "parent");
+    assert!(!dir.path().join("docs/specs/sms.md").exists());
+
+    let output = lore_in(
+        dir.path(),
+        &["add", "spec", "--slug", "sms", "--title", "문자"],
+    );
+    assert!(output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("docs/specs/sms.md")).unwrap(),
+        "---\nid: sms\ntitle: 문자\npaths: []\ntests: []\ndepends_on: []\n---\n\n## 지금 동작\n"
+    );
+
+    let output = lore_in(
+        dir.path(),
+        &["add", "spec", "--slug", "payment", "--title", "결제"],
+    );
+    assert_eq!(json(&output)["error"]["code"], "id_exists");
+
+    // YAML이 숫자로 읽는 슬러그도 따옴표로 감싸 문자열 ID로 남긴다.
+    let output = lore_in(
+        dir.path(),
+        &["add", "spec", "--slug", "2026", "--title", "연도"],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(
+        std::fs::read_to_string(dir.path().join("docs/specs/2026.md"))
+            .unwrap()
+            .starts_with("---\nid: \"2026\"\n")
+    );
 }

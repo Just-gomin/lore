@@ -33,7 +33,7 @@
 | `src/db.rs`          | SQLite 스키마와 쓰기                                 |
 | `src/index.rs`       | `docs/INDEX.md` 본문 만들기                          |
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
-| `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
+| `src/add.rs`         | `lore add`: 결정, 사고 기록, 스펙 만들기             |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
 | `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬, 워크플로 |
 | `src/check.rs`       | `lore check`: 기계적 검사와 판단이 드는 검사         |
@@ -53,7 +53,7 @@
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
 | `tests/index.rs`     | 고정 예제로 `docs/INDEX.md` 생성을 확인하는 테스트   |
 | `tests/why.rs`       | 고정 예제로 `lore why` 조회를 확인하는 테스트        |
-| `tests/add.rs`       | 고정 예제로 `lore add`를 확인하는 테스트             |
+| `tests/add.rs`       | 고정 예제로 `lore add`(결정, 사고, 스펙)를 확인하는 테스트 |
 | `tests/add_source.rs` | 고정 예제로 `lore add source`를 확인하는 테스트     |
 | `tests/install.rs`   | 빈 레포와 기존 파일로 `lore install`을 확인하는 테스트 |
 | `tests/uninstall.rs` | 설치한 것만 걷어내는지 확인하는 테스트               |
