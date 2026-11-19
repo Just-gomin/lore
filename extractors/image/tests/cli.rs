@@ -95,6 +95,8 @@ fn exif가_없으면_날짜를_입력으로_받는다() {
 fn 도구가_없거나_실패하면_설치_방법을_알린다() {
     let dir = tempfile::tempdir().unwrap();
     let (code, json) = run(&input("photo.jpg"), Some(&dir.path().join("none")));
+    let message = json["error"]["message"].as_str().unwrap();
+    assert!(message.contains("none"), "{message}");
     assert_eq!(code, Some(1));
     assert_eq!(json["error"]["code"], "tool_missing");
     assert!(
@@ -104,10 +106,11 @@ fn 도구가_없거나_실패하면_설치_방법을_알린다() {
             .contains("brew install tesseract")
     );
 
+    // 실제 tesseract는 언어 하나를 읽지 못하면 그 말을 남기고 나머지 언어로 읽은 뒤 0으로 끝난다.
     let failing = fake(
         dir.path(),
         r#"if [ "$1" = "--version" ]; then echo "tesseract 5.3.4"; exit 0; fi
-echo "Failed loading language 'kor'" >&2; exit 1"#,
+echo "Failed loading language 'kor'" >&2; echo "garbage"; exit 0"#,
     );
     let (code, json) = run(&input("photo.jpg"), Some(&failing));
     assert_eq!(code, Some(1));
@@ -118,6 +121,46 @@ echo "Failed loading language 'kor'" >&2; exit 1"#,
         "{message}"
     );
     assert!(message.contains("tesseract-ocr-kor"), "{message}");
+
+    let crashed = fake(dir.path(), r#"echo "segfault" >&2; exit 1"#);
+    let (_, json) = run(&input("photo.jpg"), Some(&crashed));
+    assert_eq!(json["error"]["code"], "tool_failed");
+
+    // 실행할 수 없는 파일(폴더)도 찾지 못한 것으로 알린다.
+    let (_, json) = run(&input("photo.jpg"), Some(dir.path()));
+    assert_eq!(json["error"]["code"], "tool_missing");
+}
+
+#[test]
+fn 판을_읽지_못하면_이름만_쓰고_빼기로_시작하는_경로는_옵션으로_넘기지_않는다() {
+    let dir = tempfile::tempdir().unwrap();
+    let tesseract = fake(
+        dir.path(),
+        r#"if [ "$1" = "--version" ]; then echo "libleptonica.so: not found" >&2; exit 127; fi
+printf 'file: %s\n' "$1""#,
+    );
+    std::fs::copy(fixture("photo.jpg"), dir.path().join("--list-langs")).unwrap();
+    let mut dashed = input("photo.jpg");
+    dashed["file"] = "--list-langs".into();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_lore-extractor-image"));
+    let mut child = command
+        .current_dir(dir.path())
+        .env("LORE_TESSERACT", &tesseract)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(dashed.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let text = json["candidates"][0]["text"].as_str().unwrap();
+    assert!(text.starts_with("(글자 인식: tesseract, 언어"), "{text}");
+    assert!(text.ends_with("file: ./--list-langs"), "{text}");
 }
 
 #[test]
@@ -150,7 +193,7 @@ fn 실제_tesseract가_고정_이미지의_글자를_읽는다() {
     }
     let mut english = input("photo.jpg");
     english["lang"] = "eng".into();
-    let (code, json) = run(&english, None);
+    let (code, json) = run(&english, Some(Path::new("tesseract")));
     assert_eq!(code, Some(0), "{json}");
     let text = json["candidates"][0]["text"].as_str().unwrap();
     assert!(text.contains("RETRY"), "{text}");

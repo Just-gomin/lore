@@ -40,7 +40,10 @@ fn main() -> ExitCode {
                 "PNG나 JPEG 이미지가 아닙니다.",
             ));
         }
-        let tool = std::env::var_os("LORE_TESSERACT").unwrap_or_else(|| "tesseract".into());
+        // 비어 있으면 없는 것으로 보고 PATH에서 찾습니다.
+        let tool = std::env::var_os("LORE_TESSERACT")
+            .filter(|tool| !tool.is_empty())
+            .unwrap_or_else(|| "tesseract".into());
         let tool = Path::new(&tool);
         let version = version(tool)?;
         let text = recognize(tool, &input.file, &lang)?;
@@ -59,10 +62,16 @@ fn is_image(bytes: &[u8]) -> bool {
 
 fn run(tool: &Path, args: &[&std::ffi::OsStr]) -> Result<Output, ConnectorError> {
     Command::new(tool).args(args).output().map_err(|error| {
-        if error.kind() == ErrorKind::NotFound {
+        if matches!(
+            error.kind(),
+            ErrorKind::NotFound | ErrorKind::PermissionDenied
+        ) {
             ConnectorError::new(
                 "tool_missing",
-                format!("{}를 찾지 못했습니다. {INSTALL}", tool.display()),
+                format!(
+                    "{}를 찾지 못했거나 실행할 수 없습니다. {INSTALL}",
+                    tool.display()
+                ),
             )
         } else {
             ConnectorError::new(
@@ -76,6 +85,9 @@ fn run(tool: &Path, args: &[&std::ffi::OsStr]) -> Result<Output, ConnectorError>
 /// `tesseract --version`의 첫 줄. 4.x는 표준 오류로 내므로 둘 다 봅니다.
 fn version(tool: &Path) -> Result<String, ConnectorError> {
     let output = run(tool, &["--version".as_ref()])?;
+    if !output.status.success() {
+        return Ok("tesseract".to_string());
+    }
     let text = format!(
         "{}\n{}",
         String::from_utf8_lossy(&output.stdout),
@@ -90,6 +102,12 @@ fn version(tool: &Path) -> Result<String, ConnectorError> {
 }
 
 fn recognize(tool: &Path, file: &Path, lang: &str) -> Result<String, ConnectorError> {
+    // `-`로 시작하는 상대 경로가 tesseract의 옵션으로 읽히지 않게 합니다.
+    let file = if file.is_relative() && file.as_os_str().to_string_lossy().starts_with('-') {
+        Path::new(".").join(file)
+    } else {
+        file.to_path_buf()
+    };
     let output = run(
         tool,
         &[
@@ -99,8 +117,10 @@ fn recognize(tool: &Path, file: &Path, lang: &str) -> Result<String, ConnectorEr
             lang.as_ref(),
         ],
     )?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    // tesseract는 언어 하나만 읽지 못하면 나머지 언어로 읽고 성공으로 끝납니다. 한국어를 영어로만 읽은 결과를
+    // 내지 않도록, 언어를 읽지 못했다는 말이 있으면 실패로 봅니다.
+    if !output.status.success() || stderr.contains("Failed loading language") {
         return Err(ConnectorError::new(
             "tool_failed",
             format!(

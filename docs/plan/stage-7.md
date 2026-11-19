@@ -116,7 +116,11 @@
 정한 것: 다음을 더 정했습니다.
 
 - 파일 머리 바이트로 PNG와 JPEG만 받고, 그 밖의 형식은 tesseract를 부르지 않고 `unreadable_file`로 냅니다.
-- `lang`은 영문자, 숫자, `_`, `+`만 받습니다. tesseract에 다른 옵션이 섞여 들어가지 않게 하기 위해서입니다.
+- `lang`은 영문자, 숫자, `_`, `+`만 받습니다. tesseract에 다른 옵션이 섞여 들어가지 않게 하기 위해서입니다. 그래서 `script/Hangul` 같은 문자 체계 이름은 받지 않습니다.
+- tesseract는 언어 하나를 읽지 못하면 남은 언어로 읽고 성공으로 끝납니다(기본 설치에서 `kor+eng`). 한국어를 영어로만 읽은 글을 내지 않도록, 표준 오류에 `Failed loading language`가 있으면 `tool_failed`로 냅니다.
+- `-`로 시작하는 상대 경로는 `./`를 붙여 넘겨 tesseract 옵션으로 읽히지 않게 합니다.
+- `LORE_TESSERACT`가 비었으면 `PATH`에서 찾고, 실행할 수 없는 파일을 가리키면 `tool_missing`입니다. `--version`이 실패하면 판 대신 `tesseract`라고만 적습니다.
+- `tool_missing`, `tool_failed`는 이미지 추출기만의 오류 코드입니다.
 - tesseract가 쪽 끝에 내는 폼 피드는 뺍니다.
 - 고정 이미지는 같은 폴더의 `make.py`가 Pillow로 만듭니다.
 
