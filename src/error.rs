@@ -148,7 +148,7 @@ impl fmt::Display for LoreError {
             ),
             LoreError::TargetNotFound { target } => write!(
                 f,
-                "'{target}'에 해당하는 기록이나 파일이 없습니다. ID나 스펙의 paths에 든 파일 경로를 넘기세요."
+                "'{target}'에 해당하는 기록이나 파일이 없습니다. ID, 스펙의 paths에 든 파일 경로, 분석을 켠 레포에서는 `파일 경로#심볼`을 넘기세요."
             ),
         }
     }

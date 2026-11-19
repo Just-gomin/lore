@@ -318,8 +318,8 @@ fn 심볼은_담은_파일의_스펙으로_답하고_언급된_기록을_위로_
             "--for-human",
         ],
     ));
-    assert!(text.contains("[유효] 언급됨(추론)"), "{text}");
-    assert!(text.contains("[대체됨] 언급됨(추론)"), "{text}");
+    assert!(text.contains("[유효]    언급됨(추론)"), "{text}");
+    assert!(text.contains("[대체됨]  언급됨(추론)"), "{text}");
 }
 
 #[test]
@@ -374,5 +374,61 @@ fn 스펙에_속하지_않은_파일의_심볼은_스펙이_없다고_알린다(
         common::stdout(&output).contains("이 심볼을 담은 파일을 맡을 스펙"),
         "{}",
         common::stdout(&output)
+    );
+}
+
+#[test]
+fn 기본_내보내기는_이름으로_찾지_않고_멤버는_클래스_이름과_함께_찾는다() {
+    let dir = repo("analysis");
+    for (id, body) in [
+        ("ADR-20261101-word", "default 값은 비워 둡니다."),
+        ("ADR-20261102-send", "Sender.send는 한 번만 보냅니다."),
+    ] {
+        write(
+            dir.path(),
+            &format!("docs/decisions/{id}.md"),
+            &decision(id, "", body).replace("payment-core", "payment-notification"),
+        );
+    }
+    common::git(dir.path(), &["add", "-A"]);
+    common::git(dir.path(), &["commit", "-qm", "records"]);
+
+    let report = json(&lore_in(
+        dir.path(),
+        &["why", "services/notification/sender.ts#default"],
+    ));
+    assert_eq!(
+        report["target"]["mentions"],
+        serde_json::json!([
+            "services/notification/sender.ts#default",
+            "services/notification/sender.ts"
+        ])
+    );
+    let decisions = &report["features"][0]["decisions"];
+    assert!(decisions[0].get("mentioned").is_none());
+    assert!(decisions[1].get("mentioned").is_none());
+
+    let report = json(&lore_in(
+        dir.path(),
+        &["why", "services/notification/sender.ts#Sender.send"],
+    ));
+    let decisions = &report["features"][0]["decisions"];
+    assert_eq!(decisions[0]["id"], "ADR-20261102-send");
+    assert_eq!(
+        decisions[0]["mentioned"],
+        serde_json::json!(["Sender.send"])
+    );
+}
+
+#[test]
+fn 자세히_안내는_위로_올린_기록을_먼저_가리킨다() {
+    let dir = analysis_with_records();
+    let text = common::stdout(&lore_in(
+        dir.path(),
+        &["why", "services/payment/core/types.ts", "--for-human"],
+    ));
+    assert!(
+        text.contains("자세히: lore why ADR-20261102-types --depth doc"),
+        "{text}"
     );
 }

@@ -62,7 +62,7 @@ pub struct Target {
     pub id: String,
     /// 노드 종류: `feature`, `decision`, `incident`, `source`, `file`, `symbol`
     pub kind: String,
-    /// 본문에서 찾은 대상의 이름. 파일이면 경로, 심볼이면 이름, 심볼 ID, 담은 파일의 경로.
+    /// 언급으로 보는 이름. 파일이면 경로, 심볼이면 이름, 심볼 ID, 담은 파일의 경로. 찾은 기록이 없어도 채운다.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub mentions: Vec<String>,
 }
@@ -443,18 +443,32 @@ fn lines(records: &[Record]) -> String {
         .map(|r| display_width(&r.title))
         .max()
         .unwrap_or(0);
+    let status_width = records
+        .iter()
+        .filter_map(Record::status_label)
+        .map(display_width)
+        .max()
+        .unwrap_or(0);
     records
         .iter()
         .map(|record| {
             let date = record.date.as_deref().unwrap_or("          ");
             let mut line = format!("  {date}  {:id_width$}  {}", record.id, record.title);
-            let mut labels: Vec<&str> = record.status_label().into_iter().collect();
-            if !record.mentioned.is_empty() {
-                labels.push("언급됨(추론)");
+            // 상태 칸을 묶음에서 가장 넓은 상태에 맞춰, 언급 표시가 줄마다 같은 자리에 오게 한다.
+            let mut tail = String::new();
+            if status_width > 0 {
+                let status = record.status_label().unwrap_or("");
+                tail.push_str(&format!(
+                    "  {status}{}",
+                    " ".repeat(status_width - display_width(status))
+                ));
             }
-            if !labels.is_empty() {
+            if !record.mentioned.is_empty() {
+                tail.push_str("  언급됨(추론)");
+            }
+            if !tail.trim().is_empty() {
                 let pad = title_width - display_width(&record.title);
-                line.push_str(&format!("{}  {}", " ".repeat(pad), labels.join(" ")));
+                line.push_str(&format!("{}{}", " ".repeat(pad), tail.trim_end()));
             }
             line
         })
@@ -552,6 +566,14 @@ fn next_step(report: &WhyReport) -> Option<&str> {
             .map(|record| record.id.as_str())
     }
     let features = &report.features;
+    // 파일이나 심볼로 물었으면 위로 올린(언급된 유효한) 기록이 먼저다.
+    let lifted = features
+        .iter()
+        .flat_map(|f| f.decisions.iter().chain(&f.incidents))
+        .find(|r| !r.mentioned.is_empty() && !r.is_superseded());
+    if let Some(record) = lifted {
+        return Some(record.id.as_str());
+    }
     latest(
         features
             .iter()
