@@ -10,25 +10,34 @@ use crate::db::{self, database_error};
 use crate::error::LoreError;
 
 /// 디비를 최신으로 맞춰 열고 대상을 해석한다. 다시 빌드했는지, 노드 ID, 노드 종류를 함께 돌려준다.
+///
+/// 심볼(`파일경로#이름`)은 `symbols`가 참일 때만 받는다.
 pub fn open_target(
     config: &Config,
     cwd: &Path,
     input: &str,
+    symbols: bool,
 ) -> Result<(Connection, bool, String, String), LoreError> {
-    if input.contains('#') {
-        return Err(LoreError::UnsupportedTarget {
-            target: input.to_string(),
-            message: "심볼 단위 조회는 6단계에서 지원합니다. 지금은 ID나 파일 경로를 넘기세요."
+    let unsupported = || LoreError::UnsupportedTarget {
+        target: input.to_string(),
+        message:
+            "이 명령의 심볼 단위 조회는 6단계에서 지원합니다. 지금은 ID나 파일 경로를 넘기세요."
                 .to_string(),
-        });
-    }
+    };
 
     let rebuilt = ensure_fresh(config)?;
     let conn = db::open(&build::db_path(config))?;
-    let (id, kind) =
-        resolve(&conn, config, cwd, input)?.ok_or_else(|| LoreError::TargetNotFound {
-            target: input.to_string(),
-        })?;
+    let found = resolve(&conn, config, cwd, input)?;
+    let (id, kind) = match found {
+        Some((_, kind)) if kind == "symbol" && !symbols => return Err(unsupported()),
+        Some(found) => found,
+        None if input.contains('#') && !symbols => return Err(unsupported()),
+        None => {
+            return Err(LoreError::TargetNotFound {
+                target: input.to_string(),
+            });
+        }
+    };
 
     Ok((conn, rebuilt, id, kind))
 }
@@ -65,6 +74,12 @@ fn resolve(
     let mut candidates = vec![input.to_string()];
     if let Some(path) = project_path(&config.root, cwd, input) {
         candidates.push(path);
+    }
+    // 심볼은 `#` 앞의 파일 경로만 프로젝트 홈 기준으로 바꾼다.
+    if let Some((file, name)) = input.rsplit_once('#')
+        && let Some(path) = project_path(&config.root, cwd, file)
+    {
+        candidates.push(format!("{path}#{name}"));
     }
     candidates.push(input.trim_start_matches("./").to_string());
 

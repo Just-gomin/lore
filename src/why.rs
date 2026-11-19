@@ -128,7 +128,7 @@ impl Record {
 
 /// 대상을 조회한다. 디비가 없거나 작업 트리와 다르면 먼저 다시 만든다.
 pub fn why(config: &Config, cwd: &Path, input: &str, depth: Depth) -> Result<WhyReport, LoreError> {
-    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input)?;
+    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input, false)?;
 
     let reader = Reader { conn: &conn, depth };
     let (features, records) = match kind.as_str() {
