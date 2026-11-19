@@ -41,7 +41,7 @@
 | `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬, 워크플로 |
 | `src/check.rs`       | `lore check`: 기계적 검사와 판단이 드는 검사         |
 | `src/query.rs`       | 조회 준비: 디비를 최신으로 맞추고 대상 해석          |
-| `src/why.rs`         | `lore why`: ID나 파일 경로로 결정과 사고 조회        |
+| `src/why.rs`         | `lore why`: ID, 파일 경로, 심볼로 결정과 사고 조회   |
 | `src/impact.rs`      | `lore impact`: 영향 범위의 다섯 묶음                 |
 | `src/report.rs`      | `lore check --report`: 근거 없는 결정과 스펙 크기 보고 |
 | `src/sync.rs`        | `lore sync`: 이름 변경에 맞춰 스펙의 경로 고치기     |

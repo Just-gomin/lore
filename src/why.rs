@@ -1,6 +1,8 @@
-//! `lore why`: ID나 파일 경로에 연결된 결정과 사고를 조회한다.
+//! `lore why`: ID, 파일 경로, 심볼에 연결된 결정과 사고를 조회한다.
 //!
 //! 디비만 읽는다. 디비가 작업 트리보다 오래됐으면 먼저 다시 만든다([`query::open_target`]).
+//! 결정과 사고는 스펙에만 연결되므로 파일과 심볼은 스펙을 거쳐 답한다. 그 스펙의 기록 중
+//! 본문에 대상이 언급된 것은 묶음 안에서 위로 올린다. 언급은 사람이 선언한 연결이 아니라 추론이다.
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -58,8 +60,11 @@ pub struct Target {
     pub input: String,
     /// 해석한 노드 ID.
     pub id: String,
-    /// 노드 종류: `feature`, `decision`, `incident`, `source`, `file`
+    /// 노드 종류: `feature`, `decision`, `incident`, `source`, `file`, `symbol`
     pub kind: String,
+    /// 본문에서 찾은 대상의 이름. 파일이면 경로, 심볼이면 이름, 심볼 ID, 담은 파일의 경로.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mentions: Vec<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -69,9 +74,9 @@ pub struct Feature {
     pub path: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub body: Option<String>,
-    /// 시간순. 대체된 결정도 함께 든다.
+    /// 시간순. 대체된 결정도 함께 든다. 파일이나 심볼로 물으면 본문에 언급된 유효한 기록이 먼저다.
     pub decisions: Vec<Record>,
-    /// 시간순.
+    /// 시간순. 파일이나 심볼로 물으면 본문에 언급된 기록이 먼저다.
     pub incidents: Vec<Record>,
 }
 
@@ -104,6 +109,9 @@ pub struct Record {
     /// `--depth source`일 때 머리말 `sources`의 외부 링크.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub links: Option<Vec<String>>,
+    /// 본문에 언급된 대상의 이름. 이 연결의 근거는 추론이다.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub mentioned: Vec<String>,
 }
 
 impl Record {
@@ -128,12 +136,37 @@ impl Record {
 
 /// 대상을 조회한다. 디비가 없거나 작업 트리와 다르면 먼저 다시 만든다.
 pub fn why(config: &Config, cwd: &Path, input: &str, depth: Depth) -> Result<WhyReport, LoreError> {
-    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input, false)?;
+    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input)?;
 
     let reader = Reader { conn: &conn, depth };
+    let mut mentions = Vec::new();
     let (features, records) = match kind.as_str() {
-        "file" => (reader.features_of_file(&id)?, Vec::new()),
-        "feature" => (vec![reader.feature(&id)?], Vec::new()),
+        "file" => {
+            mentions.push(id.clone());
+            (reader.features_of_file(&id, &mentions)?, Vec::new())
+        }
+        // 심볼은 속함 엣지로 담은 파일에 닿고, 거기서 파일처럼 스펙에 닿는다.
+        "symbol" => {
+            let file = reader.targets_of(&id, "belongs_to")?.into_iter().next();
+            let name = file
+                .as_deref()
+                .and_then(|file| id.strip_prefix(file))
+                .and_then(|rest| rest.strip_prefix('#'))
+                .unwrap_or(&id);
+            // `default`는 흔한 낱말이라 이름으로는 찾지 않는다.
+            if name != "default" {
+                mentions.push(name.to_string());
+            }
+            mentions.push(id.clone());
+            match file {
+                Some(file) => {
+                    mentions.push(file.clone());
+                    (reader.features_of_file(&file, &mentions)?, Vec::new())
+                }
+                None => (Vec::new(), Vec::new()),
+            }
+        }
+        "feature" => (vec![reader.feature(&id, &[])?], Vec::new()),
         _ => (Vec::new(), vec![reader.record(&id)?]),
     };
 
@@ -142,6 +175,7 @@ pub fn why(config: &Config, cwd: &Path, input: &str, depth: Depth) -> Result<Why
             input: input.to_string(),
             id,
             kind,
+            mentions,
         },
         depth,
         rebuilt,
@@ -203,16 +237,36 @@ impl Reader<'_> {
     }
 
     /// 파일이 구현하거나 검증하는 기능.
-    fn features_of_file(&self, file: &str) -> Result<Vec<Feature>, LoreError> {
+    fn features_of_file(&self, file: &str, mentions: &[String]) -> Result<Vec<Feature>, LoreError> {
         let ids: BTreeSet<String> = self
             .targets_of(file, "implements")?
             .into_iter()
             .chain(self.targets_of(file, "verifies")?)
             .collect();
-        ids.iter().map(|id| self.feature(id)).collect()
+        ids.iter().map(|id| self.feature(id, mentions)).collect()
     }
 
-    fn feature(&self, id: &str) -> Result<Feature, LoreError> {
+    /// 기록 본문에 든 `mentions`. 깊이와 상관없이 본문을 읽는다.
+    fn mentioned_in(&self, id: &str, mentions: &[String]) -> Result<Vec<String>, LoreError> {
+        if mentions.is_empty() {
+            return Ok(Vec::new());
+        }
+        let body: Option<String> = self
+            .conn
+            .query_row("SELECT body FROM content WHERE id = ?1", [id], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(database_error)?;
+        let body = body.unwrap_or_default();
+        Ok(mentions
+            .iter()
+            .filter(|name| mentions_word(&body, name))
+            .cloned()
+            .collect())
+    }
+
+    fn feature(&self, id: &str, mentions: &[String]) -> Result<Feature, LoreError> {
         let (_, title, path, _) = self.node(id)?;
 
         // 대체된 결정이 이 기능을 가리키지 않더라도 이력으로 함께 보여 준다.
@@ -227,13 +281,23 @@ impl Reader<'_> {
         }
         let incidents = self.sources_of(id, "occurred_in")?;
 
+        let mut decisions = self.records(decisions.iter())?;
+        let mut incidents = self.records(incidents.iter())?;
+        for record in decisions.iter_mut().chain(incidents.iter_mut()) {
+            record.mentioned = self.mentioned_in(&record.id, mentions)?;
+        }
+        // 언급된 기록을 위로 올린다. 대체된 결정은 표시만 하고 올리지 않는다. 정렬은 안정적이라 시간순이 남는다.
+        for records in [&mut decisions, &mut incidents] {
+            records.sort_by_key(|record| record.mentioned.is_empty() || record.is_superseded());
+        }
+
         Ok(Feature {
             id: id.to_string(),
             title,
             path,
             body: self.body(id)?,
-            decisions: self.records(decisions.iter())?,
-            incidents: self.records(incidents.iter())?,
+            decisions,
+            incidents,
         })
     }
 
@@ -304,8 +368,23 @@ impl Reader<'_> {
             body: self.body(id)?,
             sources,
             links,
+            mentioned: Vec::new(),
         })
     }
+}
+
+/// `text`에 `name`이 단어로 들어 있는지. 대소문자를 구분하고, 앞뒤 글자가 영문자, 숫자, `_`, `$`, `/`이면
+/// 낱말의 일부로 본다. `/`를 넣은 것은 `src/x.ts`가 `packages/a/src/x.ts` 안에서 맞지 않게 하기 위해서다.
+fn mentions_word(text: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let part = |c: char| c.is_ascii_alphanumeric() || matches!(c, '_' | '$' | '/');
+    text.match_indices(name).any(|(at, _)| {
+        let before = text[..at].chars().next_back();
+        let after = text[at + name.len()..].chars().next();
+        !before.is_some_and(part) && !after.is_some_and(part)
+    })
 }
 
 /// 사람용 조회 결과. 시나리오 문서의 형식을 따른다.
@@ -318,8 +397,13 @@ pub fn render(report: &WhyReport) -> String {
         blocks.push(render_record(record));
     }
     if blocks.is_empty() {
+        let what = if report.target.kind == "symbol" {
+            "이 심볼을 담은 파일"
+        } else {
+            "이 파일"
+        };
         blocks.push(format!(
-            "{} 에 연결된 스펙이 없습니다. 이 파일을 맡을 스펙의 paths에 더하면 결정과 사고가 이어집니다.",
+            "{} 에 연결된 스펙이 없습니다. {what}을 맡을 스펙의 paths에 더하면 결정과 사고가 이어집니다.",
             report.target.id
         ));
     }
@@ -364,9 +448,13 @@ fn lines(records: &[Record]) -> String {
         .map(|record| {
             let date = record.date.as_deref().unwrap_or("          ");
             let mut line = format!("  {date}  {:id_width$}  {}", record.id, record.title);
-            if let Some(label) = record.status_label() {
+            let mut labels: Vec<&str> = record.status_label().into_iter().collect();
+            if !record.mentioned.is_empty() {
+                labels.push("언급됨(추론)");
+            }
+            if !labels.is_empty() {
                 let pad = title_width - display_width(&record.title);
-                line.push_str(&format!("{}  {label}", " ".repeat(pad)));
+                line.push_str(&format!("{}  {}", " ".repeat(pad), labels.join(" ")));
             }
             line
         })
@@ -525,5 +613,18 @@ mod tests {
             assert_eq!(serde_json::to_value(depth).unwrap(), name);
         }
         assert_eq!(Depth::from_name("all"), None);
+    }
+
+    #[test]
+    fn 이름은_단어_경계로만_언급으로_본다() {
+        assert!(mentions_word("`f`를 부릅니다", "f"));
+        assert!(mentions_word("f(x)", "f"));
+        assert!(mentions_word("끝에 f", "f"));
+        assert!(!mentions_word("fx와 if", "f"));
+        assert!(!mentions_word("$f, f_1", "f"));
+        assert!(mentions_word("a/b.ts에서", "a/b.ts"));
+        assert!(!mentions_word("x/a/b.ts", "a/b.ts"));
+        assert!(!mentions_word("ID와 Id", "id"));
+        assert!(!mentions_word("무엇이든", ""));
     }
 }
