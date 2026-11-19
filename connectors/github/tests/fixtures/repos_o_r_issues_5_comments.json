@@ -1,7 +1,8 @@
 [
   {
     "user": {
-      "login": "ops"
+      "login": "ops",
+      "type": "User"
     },
     "body": "재현됨"
   }

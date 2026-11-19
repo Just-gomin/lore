@@ -131,3 +131,33 @@ fn 인자가_틀리면_json_사용법_오류다() {
     );
     assert_eq!(code, Some(2));
 }
+
+#[test]
+fn 최신_판_모드에서_gh를_부르지_못하면_빈_목록이_아니라_실패다() {
+    let dir = tempfile::tempdir().unwrap();
+    let sources = dir.path().join("docs/sources");
+    std::fs::create_dir_all(&sources).unwrap();
+    std::fs::write(
+        sources.join("SRC-a.md"),
+        "---\norigin: https://github.com/o/r/pull/3\norigin_version: v\n---\n",
+    )
+    .unwrap();
+    // 고정 응답 없이, gh를 찾을 수 없는 PATH로 실행한다.
+    let output = Command::new(env!("CARGO_BIN_EXE_lore-connector-github"))
+        .current_dir(dir.path())
+        .args(["--origins", "docs"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let report: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(report["ok"], false);
+    assert_eq!(report["error"]["code"], "github");
+}
+
+#[test]
+fn 레포는_owner_name_꼴이어야_한다() {
+    let dir = tempfile::tempdir().unwrap();
+    let (code, stdout) = run(dir.path(), &["--channel", "github", "--repo", "o"]);
+    assert_eq!(code, Some(2), "{stdout}");
+}

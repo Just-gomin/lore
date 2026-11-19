@@ -1,16 +1,26 @@
 [
   {
     "user": {
-      "login": "lead"
+      "login": "lead",
+      "type": "User"
     },
     "state": "APPROVED",
     "body": "좋습니다"
   },
   {
     "user": {
-      "login": "bot"
+      "login": "bot",
+      "type": "User"
     },
     "state": "COMMENTED",
     "body": ""
+  },
+  {
+    "user": {
+      "login": "me",
+      "type": "User"
+    },
+    "state": "PENDING",
+    "body": "작성 중"
   }
 ]

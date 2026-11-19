@@ -1,7 +1,8 @@
 [
   {
     "user": {
-      "login": "lead"
+      "login": "lead",
+      "type": "User"
     },
     "path": "retry.ts",
     "body": "상수로 빼 주세요"
