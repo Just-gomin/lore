@@ -131,8 +131,6 @@ pub enum Request {
         from: Option<String>,
         date: Option<String>,
     },
-    /// 아직 구현하지 않은 명령.
-    Pending(Command),
 }
 
 impl Request {
@@ -188,7 +186,7 @@ impl Request {
                     date: sub.get_one::<String>(DATE).cloned(),
                 },
                 Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
-                None => Request::Pending(Command::Add),
+                None => unreachable!("clap이 add의 하위 명령을 요구한다"),
             },
             Command::Init => Request::Init {
                 scope: matches.get_one::<String>(SCOPE).cloned(),

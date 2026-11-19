@@ -440,6 +440,8 @@ fn unmapped_check(config: &Config, corpus: &source::Corpus, changes: Option<&[Ch
         .iter()
         .filter(|change| matches!(change.kind, ChangeKind::Added | ChangeKind::Renamed))
         .map(|change| change.path.as_str())
+        // 범위 밖으로 이름이 바뀐 파일은 범위 안의 매핑을 따질 대상이 아닙니다.
+        .filter(|path| scope_contains(config, path))
         .filter(|path| coverage.is_code(path) && !coverage.is_mapped(path))
         .map(|path| Finding {
             spec: None,
@@ -468,6 +470,14 @@ fn in_scope(config: &Config, changes: &[Change]) -> Vec<Change> {
         .filter(|change| inside(&change.path) || change.from.as_deref().is_some_and(inside))
         .cloned()
         .collect()
+}
+
+/// 경로가 `check.scope` 안인지. 범위가 없으면 모두 안입니다.
+fn scope_contains(config: &Config, path: &str) -> bool {
+    config
+        .scope
+        .as_ref()
+        .is_none_or(|scope| compile(scope).iter().any(|glob| glob.is_match(path)))
 }
 
 /// 파일이 스펙에 속하는지 가르는 기준. 매핑 누락 검사와 `lore init`이 함께 씁니다.

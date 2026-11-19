@@ -23,7 +23,7 @@ fn 진행_상태와_스펙에_속한_코드_파일의_비율을_낸다() {
             "scope": "",
             "files": 8,
             "mapped": 7,
-            "ratio": 0.88,
+            "ratio": 0.87,
             "unmapped": ["README.md"],
         })
     );
@@ -41,6 +41,11 @@ fn 범위를_주면_그_폴더의_파일만_센다() {
     assert_eq!(report["coverage"]["files"], 6);
     assert_eq!(report["coverage"]["ratio"], 1.0);
     assert_eq!(report["next"], "done");
+
+    // 스펙이 맡을 코드 파일이 없는 범위는 끝난 것이 아니다.
+    let report = json(&lore_in(dir.path(), &["init", "--scope", "docs"]));
+    assert_eq!(report["coverage"]["files"], 0);
+    assert_eq!(report["next"], "no_files");
 
     let output = lore_in(dir.path(), &["init", "--scope", "nowhere"]);
     assert_eq!(output.status.code(), Some(1));
@@ -78,7 +83,7 @@ fn 사람용_출력은_다음_단계와_속하지_않은_파일을_보여_준다
         common::stdout(&output),
         "lore init: 다음은 3단계 스펙과 결정 초안 (lore-init-draft)
   채널 3개, 소스 노트 2개, 스펙 4개
-  프로젝트 전체: 코드 파일 8개 중 7개가 스펙에 속함 (88%)
+  프로젝트 전체: 코드 파일 8개 중 7개가 스펙에 속함 (87%)
     README.md
 "
     );

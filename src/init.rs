@@ -14,7 +14,8 @@ use crate::{git, query, source};
 
 #[derive(Debug, Serialize)]
 pub struct InitReport {
-    /// 다음에 할 단계. `channels`, `collect`, `draft`, `done`
+    /// 다음에 할 단계. `channels`, `collect`, `draft`, `done`.
+    /// 범위에 스펙이 맡을 코드 파일이 하나도 없으면 `no_files`다. 아직 `git add`하지 않은 폴더일 수 있다.
     pub next: &'static str,
     pub channels: Vec<ChannelStatus>,
     pub sources: usize,
@@ -93,6 +94,8 @@ pub fn init(config: &Config, cwd: &Path, scope: Option<&str>) -> Result<InitRepo
         "channels"
     } else if sources == 0 {
         "collect"
+    } else if files.is_empty() {
+        "no_files"
     } else if !unmapped.is_empty() {
         "draft"
     } else {
@@ -107,8 +110,9 @@ pub fn init(config: &Config, cwd: &Path, scope: Option<&str>) -> Result<InitRepo
             scope,
             files: files.len(),
             mapped,
+            // 버림으로 계산해 속하지 않은 파일이 남았는데 1.0이 되지 않게 합니다.
             ratio: (!files.is_empty())
-                .then(|| (mapped as f64 / files.len() as f64 * 100.0).round() / 100.0),
+                .then(|| (mapped as f64 / files.len() as f64 * 100.0).floor() / 100.0),
             unmapped,
         },
     })
@@ -120,6 +124,7 @@ pub fn render(report: &InitReport) -> String {
         "channels" => "1단계 채널 고르기 (lore-init-channels)",
         "collect" => "2단계 자료 모으기 (lore-init-collect)",
         "draft" => "3단계 스펙과 결정 초안 (lore-init-draft)",
+        "no_files" => "범위에 스펙이 맡을 코드 파일이 없음. 새 파일이면 git add가 필요합니다",
         _ => "끝",
     };
     let coverage = &report.coverage;
@@ -137,7 +142,7 @@ pub fn render(report: &InitReport) -> String {
         coverage.mapped
     );
     if let Some(ratio) = coverage.ratio {
-        text.push_str(&format!(" ({}%)", (ratio * 100.0).round()));
+        text.push_str(&format!(" ({}%)", (ratio * 100.0).floor()));
     }
     for path in &coverage.unmapped {
         text.push_str(&format!("\n    {path}"));

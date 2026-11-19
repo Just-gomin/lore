@@ -94,7 +94,6 @@ fn read_origins(paths: &[String], cwd: &Path) -> Result<Option<check::Origins>, 
 
 fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
     let result = match request {
-        Request::Pending(command) => return output::not_implemented(command, for_human),
         Request::Build => config::discover(cwd)
             .and_then(|config| build::build(&config))
             .map(|report| output::success(&report, for_human, build::render)),

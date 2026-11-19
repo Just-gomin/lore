@@ -85,7 +85,6 @@ struct SuccessJson<'a, T> {
 #[derive(Serialize)]
 #[serde(tag = "code", rename_all = "snake_case")]
 enum ErrorJson<'a> {
-    NotImplemented { command: &'a str },
     UnknownCommand { command: &'a str },
     InvalidArguments { message: &'a str },
 }
@@ -186,16 +185,6 @@ pub fn help(for_human: bool) -> Outcome {
     }
 }
 
-pub fn not_implemented(command: Command, for_human: bool) -> Outcome {
-    Outcome::fail(
-        for_human,
-        failure(ErrorJson::NotImplemented {
-            command: command.name(),
-        }),
-        format!("lore {}: 아직 구현되지 않았습니다.", command.name()),
-    )
-}
-
 pub fn unknown_command(name: &str, for_human: bool) -> Outcome {
     Outcome::fail(
         for_human,
@@ -239,8 +228,8 @@ mod tests {
     #[test]
     fn 한글은_그대로_둔다() {
         assert_eq!(
-            failure(ErrorJson::NotImplemented { command: "결정" }),
-            r#"{"ok":false,"error":{"code":"not_implemented","command":"결정"}}"#
+            failure(ErrorJson::UnknownCommand { command: "결정" }),
+            r#"{"ok":false,"error":{"code":"unknown_command","command":"결정"}}"#
         );
     }
 }

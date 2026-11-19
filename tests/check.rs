@@ -825,3 +825,26 @@ fn check_scope_밖의_변경은_판단이_드는_검사가_보지_않는다() {
     assert_eq!(status_of(&report, "spec_update"), "pass");
     assert!(findings(&report, "spec_update").is_empty());
 }
+
+#[test]
+fn check_scope_밖으로_이름을_바꾼_파일은_매핑_누락으로_보지_않는다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{original}\ncheck:\n  scope: ['services/payment/**']\n"),
+    )
+    .unwrap();
+    commit_all(dir.path(), "판단 검사 범위");
+    std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+    git(
+        dir.path(),
+        &["mv", "services/payment/retry/policy.ts", "tools/policy.ts"],
+    );
+    commit_all(dir.path(), "범위 밖으로 옮김");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+    // 원래 경로가 범위 안이라 옮겨 간 스펙의 동반 갱신은 본다.
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+}
