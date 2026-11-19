@@ -74,7 +74,7 @@ impl<'a> Resolver<'a> {
     pub fn resolve(&self, from: &str, specifier: &str) -> Resolution {
         let dir = parent(from);
         if is_relative(specifier) {
-            return self.relative(&format!("{dir}/{specifier}"), specifier.ends_with('/'));
+            return self.relative(&format!("{dir}/{specifier}"), names_folder(specifier));
         }
         if let Some(config) = self.tsconfig_for(dir) {
             if let Some(resolution) = self.alias(&config, specifier) {
@@ -110,13 +110,21 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// `paths`의 패턴 중 맞는 것. TypeScript처럼 `*` 앞부분이 가장 긴 패턴을 쓴다.
+    /// `paths`의 패턴 중 맞는 것. TypeScript처럼 글자 그대로 맞는 패턴을 먼저, 그다음 `*` 앞부분이 가장 긴 패턴을 쓴다.
+    ///
+    /// 패턴이 `*` 하나뿐이면 모든 이름에 맞으므로, 파일에 잇지 못하면 별칭이 아닌 것으로 보고 넘긴다.
+    /// TypeScript도 `paths`에서 찾지 못하면 `node_modules`로 넘어간다.
     fn alias(&self, config: &TsConfig, specifier: &str) -> Option<Resolution> {
         let (pattern, targets) = config
             .paths
             .iter()
             .filter(|(pattern, _)| capture(pattern, specifier).is_some())
-            .max_by_key(|(pattern, _)| pattern.split('*').next().unwrap_or("").len())?;
+            .max_by_key(|(pattern, _)| {
+                (
+                    !pattern.contains('*'),
+                    pattern.split('*').next().unwrap_or("").len(),
+                )
+            })?;
         let captured = capture(pattern, specifier)?;
         let mut asset = false;
         for target in targets {
@@ -125,17 +133,19 @@ impl<'a> Resolver<'a> {
                 config.paths_base,
                 target.replacen('*', captured, 1)
             );
-            match self.relative(&joined, target.ends_with('/')) {
+            match self.relative(&joined, names_folder(&joined)) {
                 Resolution::File(file) => return Some(Resolution::File(file)),
                 Resolution::Asset => asset = true,
                 _ => {}
             }
         }
-        Some(if asset {
-            Resolution::Asset
+        if asset {
+            Some(Resolution::Asset)
+        } else if pattern == "*" {
+            None
         } else {
-            Resolution::Unresolved
-        })
+            Some(Resolution::Unresolved)
+        }
     }
 
     /// 워크스페이스 패키지 이름으로 가져온 것. 패키지 이름이 아니면 `None`이다.
@@ -177,12 +187,16 @@ impl<'a> Resolver<'a> {
         } else {
             format!("{dir}/tsconfig.json")
         };
-        let found = if self.root.join(&path).is_file() {
-            load_tsconfig(self.root, &path, 0).map(Rc::new)
-        } else if dir.is_empty() {
-            None
-        } else {
-            self.tsconfig_for(parent(dir))
+        // git이 추적하는 설정만 읽는다. 읽지 못하면 위 폴더의 설정을 쓴다.
+        let loaded = self
+            .known
+            .contains(path.as_str())
+            .then(|| load_tsconfig(self.root, &self.known, &path, 0))
+            .flatten();
+        let found = match loaded {
+            Some(config) => Some(Rc::new(config)),
+            None if dir.is_empty() => None,
+            None => self.tsconfig_for(parent(dir)),
         };
         self.nearest
             .borrow_mut()
@@ -193,6 +207,15 @@ impl<'a> Resolver<'a> {
 
 fn parent(path: &str) -> &str {
     path.rsplit_once('/').map_or("", |(dir, _)| dir)
+}
+
+/// 폴더를 가리키는 경로인지. `/`로 끝나거나 `.`, `..`로 끝나면 같은 이름의 파일이 아니라 폴더의 `index`를 찾는다.
+fn names_folder(path: &str) -> bool {
+    path.ends_with('/')
+        || path == "."
+        || path == ".."
+        || path.ends_with("/.")
+        || path.ends_with("/..")
 }
 
 pub(crate) fn is_relative(specifier: &str) -> bool {
@@ -216,27 +239,44 @@ fn capture<'s>(pattern: &str, specifier: &'s str) -> Option<&'s str> {
 /// `tsconfig.json`을 읽고 `extends`를 따라간다. 주석과 끝 쉼표가 있어 JSON5로 읽는다.
 ///
 /// `extends`는 레포 안의 상대 경로만 따라가고, 패키지 이름(`@tsconfig/node20` 등)은 무시한다.
-fn load_tsconfig(root: &Path, path: &str, depth: usize) -> Option<TsConfig> {
-    if depth > 8 {
+/// TypeScript 5의 배열 꼴이면 앞에서부터 읽어 뒤의 것이 앞의 것을 덮는다. git이 추적하는 파일만 읽는다.
+fn load_tsconfig(root: &Path, known: &HashSet<&str>, path: &str, depth: usize) -> Option<TsConfig> {
+    if depth > 8 || !known.contains(path) {
         return None;
     }
     let text = std::fs::read_to_string(root.join(path)).ok()?;
     let value: Value = json5::from_str(&text).ok()?;
     let dir = parent(path);
-    let mut config = value
-        .get("extends")
-        .and_then(Value::as_str)
-        .filter(|extends| is_relative(extends))
-        .and_then(|extends| {
-            let joined = normalize(&format!("{dir}/{extends}"))?;
-            let file = if joined.ends_with(".json") {
-                joined
-            } else {
-                format!("{joined}.json")
-            };
-            load_tsconfig(root, &file, depth + 1)
+    let config_path = |reference: &str, default_file: &str| -> Option<String> {
+        let joined = normalize(&format!("{dir}/{reference}"))?;
+        Some(if joined.ends_with(".json") {
+            joined
+        } else if default_file.is_empty() {
+            format!("{joined}.json")
+        } else {
+            format!("{joined}/{default_file}")
         })
-        .unwrap_or_default();
+    };
+    let extends: Vec<&str> = match value.get("extends") {
+        Some(Value::String(one)) => vec![one.as_str()],
+        Some(Value::Array(many)) => many.iter().filter_map(Value::as_str).collect(),
+        _ => Vec::new(),
+    };
+    let mut config = TsConfig::default();
+    for parent_config in extends
+        .into_iter()
+        .filter(|extends| is_relative(extends))
+        .filter_map(|extends| config_path(extends, ""))
+        .filter_map(|file| load_tsconfig(root, known, &file, depth + 1))
+    {
+        if parent_config.base_url.is_some() {
+            config.base_url = parent_config.base_url.clone();
+        }
+        if !parent_config.paths.is_empty() {
+            config.paths = parent_config.paths.clone();
+            config.paths_base = parent_config.paths_base.clone();
+        }
+    }
     let options = value.get("compilerOptions");
     if let Some(base) = options
         .and_then(|options| options.get("baseUrl"))
@@ -267,6 +307,20 @@ fn load_tsconfig(root: &Path, path: &str, depth: usize) -> Option<TsConfig> {
     }
     if let Some(base) = &config.base_url {
         config.paths_base = base.clone();
+    }
+    // Vite처럼 루트 설정이 `references`만 두고 `paths`를 다른 파일(`tsconfig.app.json` 등)에 둔 경우
+    if config.paths.is_empty()
+        && let Some(references) = value.get("references").and_then(Value::as_array)
+        && let Some(referenced) = references
+            .iter()
+            .filter_map(|reference| reference.get("path").and_then(Value::as_str))
+            .filter_map(|reference| config_path(reference, "tsconfig.json"))
+            .filter_map(|file| load_tsconfig(root, known, &file, depth + 1))
+            .find(|referenced| !referenced.paths.is_empty())
+    {
+        config.paths = referenced.paths;
+        config.paths_base = referenced.paths_base;
+        config.base_url = config.base_url.or(referenced.base_url);
     }
     Some(config)
 }
@@ -330,16 +384,6 @@ fn workspace_packages(root: &Path, tracked: &[String]) -> Vec<Package> {
 
 /// `exports`에서 `subpath`(`.` 또는 `./x`)가 가리키는 파일. 조건은 `import`, `default`, `require` 순으로 고른다.
 fn export_target(exports: &Value, subpath: &str) -> Option<String> {
-    let conditional = |value: &Value| -> Option<String> {
-        match value {
-            Value::String(target) => Some(target.clone()),
-            Value::Object(map) => ["import", "default", "require"]
-                .iter()
-                .find_map(|key| map.get(*key).and_then(Value::as_str))
-                .map(str::to_string),
-            _ => None,
-        }
-    };
     match exports {
         Value::String(target) if subpath == "." => Some(target.clone()),
         Value::Object(map) if map.keys().all(|key| !key.starts_with('.')) => {
@@ -349,11 +393,28 @@ fn export_target(exports: &Value, subpath: &str) -> Option<String> {
             if let Some(value) = map.get(subpath) {
                 return conditional(value);
             }
-            map.iter().find_map(|(key, value)| {
-                let captured = capture(key, subpath)?;
-                Some(conditional(value)?.replacen('*', captured, 1))
-            })
+            // Node처럼 `*` 앞부분이 가장 긴 패턴을 쓴다.
+            map.iter()
+                .filter_map(|(key, value)| Some((key, capture(key, subpath)?, value)))
+                .max_by_key(|(key, _, _)| key.split('*').next().unwrap_or("").len())
+                .and_then(|(_, captured, value)| {
+                    Some(conditional(value)?.replacen('*', captured, 1))
+                })
         }
+        _ => None,
+    }
+}
+
+/// 조건부 내보내기의 대상. 조건은 `import`, `default`, `require` 순으로 고르고 안쪽 조건까지 따라간다.
+/// `types`는 선언 파일이라 쓰지 않고, `null`은 내보내지 않는다는 뜻이다. 배열이면 처음 것을 쓴다.
+fn conditional(value: &Value) -> Option<String> {
+    match value {
+        Value::String(target) => Some(target.clone()),
+        Value::Object(map) => ["import", "default", "require"]
+            .iter()
+            .filter_map(|key| map.get(*key))
+            .find_map(conditional),
+        Value::Array(items) => items.iter().find_map(conditional),
         _ => None,
     }
 }
@@ -361,6 +422,85 @@ fn export_target(exports: &Value, subpath: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn write_all(root: &Path, files: &[(&str, &str)]) -> Vec<String> {
+        for (path, text) in files {
+            let file = root.join(path);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, text).unwrap();
+        }
+        files.iter().map(|(path, _)| path.to_string()).collect()
+    }
+
+    #[test]
+    fn references와_배열_extends의_paths를_읽고_별표_하나뿐인_별칭은_넘긴다() {
+        let dir = tempfile::tempdir().unwrap();
+        let tracked = write_all(
+            dir.path(),
+            &[
+                (
+                    "tsconfig.json",
+                    r#"{"files": [], "references": [{"path": "./tsconfig.app.json"}]}"#,
+                ),
+                (
+                    "tsconfig.app.json",
+                    r#"{"extends": ["./base-a", "./base-b.json"]}"#,
+                ),
+                (
+                    "base-a.json",
+                    r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#,
+                ),
+                (
+                    "base-b.json",
+                    r#"{"compilerOptions": {"paths": {"~/*": ["./src/*"], "*": ["./types/*"]}}}"#,
+                ),
+                ("src/lib/index.ts", ""),
+                ("src/lib.ts", ""),
+                ("src/main.ts", ""),
+            ],
+        );
+        let resolver = Resolver::new(dir.path(), &tracked, false);
+        // 배열의 뒤 설정(base-b)이 앞 설정의 paths를 덮는다.
+        assert_eq!(
+            resolver.resolve("src/main.ts", "~/lib"),
+            Resolution::File("src/lib.ts".to_string())
+        );
+        assert_eq!(
+            resolver.resolve("src/main.ts", "~/lib/"),
+            Resolution::File("src/lib/index.ts".to_string())
+        );
+        assert_eq!(
+            resolver.resolve("src/main.ts", "@/lib"),
+            Resolution::External
+        );
+        // `*` 하나뿐인 패턴에 맞았지만 파일이 없으면 레포 밖 패키지로 본다.
+        assert_eq!(
+            resolver.resolve("src/main.ts", "react"),
+            Resolution::External
+        );
+    }
+
+    #[test]
+    fn git이_추적하지_않거나_깨진_tsconfig는_위_폴더의_것을_쓴다() {
+        let dir = tempfile::tempdir().unwrap();
+        let tracked = write_all(
+            dir.path(),
+            &[
+                (
+                    "tsconfig.json",
+                    r#"{"compilerOptions": {"paths": {"@/*": ["./src/*"]}}}"#,
+                ),
+                ("app/tsconfig.json", "{ 깨진 설정"),
+                ("src/a.ts", ""),
+                ("app/main.ts", ""),
+            ],
+        );
+        let resolver = Resolver::new(dir.path(), &tracked, false);
+        assert_eq!(
+            resolver.resolve("app/main.ts", "@/a"),
+            Resolution::File("src/a.ts".to_string())
+        );
+    }
 
     #[test]
     fn 패턴의_별표_자리를_잡는다() {
@@ -393,5 +533,20 @@ mod tests {
             export_target(&serde_json::json!({"default": "./a.ts"}), ".").as_deref(),
             Some("./a.ts")
         );
+        // 안쪽 조건과, 더 구체적인 패턴
+        let exports: Value = serde_json::json!({
+            ".": {"import": {"types": "./a.d.ts", "default": "./src/index.ts"}},
+            "./*": "./src/*.ts",
+            "./utils/*": "./src/utils/*.js",
+        });
+        assert_eq!(
+            export_target(&exports, ".").as_deref(),
+            Some("./src/index.ts")
+        );
+        assert_eq!(
+            export_target(&exports, "./utils/u").as_deref(),
+            Some("./src/utils/u.js")
+        );
+        assert_eq!(export_target(&serde_json::json!({".": null}), "."), None);
     }
 }

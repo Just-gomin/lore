@@ -313,10 +313,10 @@ mod tests {
         );
         // 분석하지 않는 선언 파일로는 잇지 않는다.
         assert_eq!(resolve_in(&files, "src/x.ts", "./types.d"), None);
-        // `..`도 상대 경로다. `src/lib/inner`에서 `..`은 `src/lib`이고, 같은 이름의 파일이 먼저다.
+        // `.`, `..`은 폴더를 가리킨다. TypeScript와 Node처럼 같은 이름의 파일보다 폴더의 index를 찾는다.
         assert_eq!(
             resolve_in(&files, "src/lib/inner/y.ts", "..").as_deref(),
-            Some("src/lib.ts")
+            Some("src/lib/index.ts")
         );
     }
 
