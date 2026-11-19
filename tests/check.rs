@@ -627,7 +627,7 @@ fn 판단이_드는_검사의_사람용_출력은_스펙과_파일을_보여_준
         text.contains(
             "경고  스펙 동반 갱신
   payment-notification 영향 없음으로 넘김: 주석만 바꿈
-  payment-retry 스펙이 바뀌지 않았습니다. 바뀐 파일: services/payment/retry/policy.ts
+  payment-retry 스펙의 본문이 바뀌지 않았습니다. 바뀐 파일: services/payment/retry/policy.ts
   고치려면: "
         ),
         "{text}"
@@ -749,4 +749,102 @@ fn 보고의_사람용_출력은_검사_결과_뒤에_붙는다() {
         ),
         "{text}"
     );
+}
+
+#[test]
+fn 원본_목록을_여러_파일로_주면_합쳐서_비교한다() {
+    let dir = clean_repo();
+    let write = |name: &str, entries: &[(&str, &str)]| {
+        let list: Vec<Value> = entries
+            .iter()
+            .map(|(origin, version)| serde_json::json!({"origin": origin, "origin_version": version}))
+            .collect();
+        std::fs::write(dir.path().join(name), Value::Array(list).to_string()).unwrap();
+    };
+    write("a.json", &[THREAD]);
+    write("b.json", &[MEETING]);
+    let output = lore_in(
+        dir.path(),
+        &["check", "--origins", "a.json", "--origins", "b.json"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let report = json(&output);
+    assert_eq!(status_of(&report, "freshness"), "pass");
+    assert!(check_of(&report, "freshness").get("unchecked").is_none());
+
+    // 두 파일이 같은 원본을 다른 판으로 적으면 입력 오류다.
+    write("b.json", &[MEETING, (THREAD.0, "다른 판")]);
+    let report = json(&lore_in(
+        dir.path(),
+        &["check", "--origins", "a.json", "--origins", "b.json"],
+    ));
+    assert_eq!(report["error"]["problems"][0]["code"], "duplicate_origin");
+    assert_eq!(report["error"]["problems"][0]["path"], "b.json");
+}
+
+#[test]
+fn check_scope_밖의_변경은_판단이_드는_검사가_보지_않는다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{original}\ncheck:\n  scope: ['services/payment/**']\n"),
+    )
+    .unwrap();
+    commit_all(dir.path(), "판단 검사 범위");
+    edit(
+        dir.path(),
+        "services/notification/retry-alert.ts",
+        "export",
+        "// 범위 밖\nexport",
+    );
+    std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+    std::fs::write(dir.path().join("tools/seed.ts"), "export {};\n").unwrap();
+    commit_all(dir.path(), "범위 밖 변경");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+    assert!(findings(&report, "spec_update").is_empty());
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+
+    // 범위 안의 변경은 그대로 본다.
+    edit(
+        dir.path(),
+        "services/payment/retry/policy.ts",
+        "export",
+        "// 범위 안\nexport",
+    );
+    commit_all(dir.path(), "범위 안 변경");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "warn");
+
+    // 빈 목록이면 아무것도 보지 않는다.
+    std::fs::write(&config, format!("{original}\ncheck:\n  scope: []\n")).unwrap();
+    commit_all(dir.path(), "검사 끔");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "spec_update"), "pass");
+    assert!(findings(&report, "spec_update").is_empty());
+}
+
+#[test]
+fn check_scope_밖으로_이름을_바꾼_파일은_매핑_누락으로_보지_않는다() {
+    let dir = feature_repo();
+    let config = dir.path().join("lore.config.yaml");
+    let original = std::fs::read_to_string(&config).unwrap();
+    std::fs::write(
+        &config,
+        format!("{original}\ncheck:\n  scope: ['services/payment/**']\n"),
+    )
+    .unwrap();
+    commit_all(dir.path(), "판단 검사 범위");
+    std::fs::create_dir_all(dir.path().join("tools")).unwrap();
+    git(
+        dir.path(),
+        &["mv", "services/payment/retry/policy.ts", "tools/policy.ts"],
+    );
+    commit_all(dir.path(), "범위 밖으로 옮김");
+    let (_, report) = check_against_main(dir.path(), None);
+    assert_eq!(status_of(&report, "unmapped"), "pass");
+    // 원래 경로가 범위 안이라 옮겨 간 스펙의 동반 갱신은 본다.
+    assert_eq!(status_of(&report, "spec_update"), "warn");
 }

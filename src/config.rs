@@ -19,12 +19,17 @@ pub struct Config {
     pub channels: Vec<Channel>,
     /// 어떤 스펙에도 속하지 않아도 되는 파일의 글롭. 매핑 누락 검사에서 뺀다.
     pub ignore: Vec<String>,
+    /// 판단이 드는 검사가 볼 파일의 글롭. 없으면 전체, 빈 목록이면 아무 파일도 보지 않는다.
+    /// `lore init`을 마친 모듈부터 검사를 켜기 위해서다.
+    pub scope: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Channel {
     pub id: String,
     pub sensitivity: Sensitivity,
+    /// 수집 경로. 커넥터 실행 파일 이름, `agent`(에이전트 도구), `file`(파일 가져오기). 코어는 읽어서 보여 주기만 한다.
+    pub tool: Option<String>,
 }
 
 /// 출처별 민감도 등급. 기획서 2장의 세 등급이다.
@@ -80,12 +85,14 @@ struct RawConfig {
 struct RawCheck {
     #[serde(default)]
     ignore: Vec<String>,
+    scope: Option<Vec<String>>,
 }
 
 #[derive(Deserialize)]
 struct RawChannel {
     id: String,
     sensitivity: Option<String>,
+    tool: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -157,14 +164,23 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         channels.push(Channel {
             id: raw.id,
             sensitivity,
+            tool: raw.tool,
         });
     }
 
-    for pattern in &raw.check.ignore {
-        if let Err(error) = crate::graph::matcher(pattern) {
-            return Err(invalid(format!(
-                "check.ignore의 '{pattern}'는 글롭으로 읽을 수 없습니다: {error}"
-            )));
+    for (field, patterns) in [
+        ("check.ignore", &raw.check.ignore),
+        (
+            "check.scope",
+            raw.check.scope.as_ref().unwrap_or(&Vec::new()),
+        ),
+    ] {
+        for pattern in patterns {
+            if let Err(error) = crate::graph::matcher(pattern) {
+                return Err(invalid(format!(
+                    "{field}의 '{pattern}'는 글롭으로 읽을 수 없습니다: {error}"
+                )));
+            }
         }
     }
 
@@ -173,6 +189,7 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         docs,
         channels,
         ignore: raw.check.ignore,
+        scope: raw.check.scope,
     })
 }
 
@@ -214,6 +231,27 @@ mod tests {
         assert!(config("version: 1\n").unwrap().ignore.is_empty());
         assert!(matches!(
             config("version: 1\ncheck:\n  ignore: ['a/[b']\n"),
+            Err(LoreError::InvalidConfig { .. })
+        ));
+    }
+
+    #[test]
+    fn 채널의_수집_경로와_검사_범위를_읽는다() {
+        let text = "version: 1\nchannels:\n  - id: git\n    tool: lore-connector-git\n  - id: memo\ncheck:\n  scope: ['server/**']\n";
+        let parsed = config(text).unwrap();
+        assert_eq!(
+            parsed.channels[0].tool.as_deref(),
+            Some("lore-connector-git")
+        );
+        assert_eq!(parsed.channels[1].tool, None);
+        assert_eq!(parsed.scope, Some(vec!["server/**".to_string()]));
+        assert_eq!(config("version: 1\n").unwrap().scope, None);
+        assert_eq!(
+            config("version: 1\ncheck:\n  scope: []\n").unwrap().scope,
+            Some(Vec::new())
+        );
+        assert!(matches!(
+            config("version: 1\ncheck:\n  scope: ['a/[b']\n"),
             Err(LoreError::InvalidConfig { .. })
         ));
     }

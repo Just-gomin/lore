@@ -1,0 +1,23 @@
+[
+  {
+    "user": {
+      "login": "pm",
+      "type": "User"
+    },
+    "body": "중복 결제 위험은?"
+  },
+  {
+    "user": {
+      "login": "dev",
+      "type": "User"
+    },
+    "body": "멱등 키로 막습니다."
+  },
+  {
+    "user": {
+      "login": "release-bot[bot]",
+      "type": "Bot"
+    },
+    "body": "v1.2.0에 포함됨"
+  }
+]

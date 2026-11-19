@@ -15,6 +15,7 @@ pub mod git;
 pub mod graph;
 pub mod impact;
 pub mod index;
+pub mod init;
 pub mod install;
 pub mod output;
 pub mod query;
@@ -78,9 +79,21 @@ fn read_input(from: Option<&str>, cwd: &Path) -> Result<(String, String), error:
     }
 }
 
+/// `--origins` 파일들을 읽어 하나의 목록으로 합칩니다. 파일이 없으면 `None`이다.
+fn read_origins(paths: &[String], cwd: &Path) -> Result<Option<check::Origins>, error::LoreError> {
+    if paths.is_empty() {
+        return Ok(None);
+    }
+    let mut origins = check::Origins::new();
+    for path in paths {
+        let (name, text) = read_input(Some(path), cwd)?;
+        check::parse_origins(&name, &text, &mut origins)?;
+    }
+    Ok(Some(origins))
+}
+
 fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
     let result = match request {
-        Request::Pending(command) => return output::not_implemented(command, for_human),
         Request::Build => config::discover(cwd)
             .and_then(|config| build::build(&config))
             .map(|report| output::success(&report, for_human, build::render)),
@@ -92,12 +105,7 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             base,
             pr_body,
             report,
-        } => origins
-            .map(|path| {
-                read_input(Some(&path), cwd)
-                    .and_then(|(name, text)| check::parse_origins(&name, &text))
-            })
-            .transpose()
+        } => read_origins(&origins, cwd)
             .and_then(|origins| {
                 let pr_body = pr_body
                     .map(|path| read_input(Some(&path), cwd).map(|(_, text)| text))
@@ -111,6 +119,9 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
                 config::discover(cwd).and_then(|config| check::check(&config, &options))
             })
             .map(|report| output::verdict(&report, report.passed(), for_human, check::render)),
+        Request::Init { scope } => config::discover(cwd)
+            .and_then(|config| init::init(&config, cwd, scope.as_deref()))
+            .map(|report| output::success(&report, for_human, init::render)),
         Request::Sync { base, dry_run } => config::discover(cwd)
             .and_then(|config| sync::sync(&config, &base, dry_run))
             .map(|report| output::success(&report, for_human, sync::render)),
@@ -119,7 +130,11 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             with_config,
         } => install::uninstall(cwd, dry_run, with_config)
             .map(|report| output::success(&report, for_human, install::render)),
-        Request::Install { dry_run, skills } => install::install(cwd, dry_run, skills)
+        Request::Install {
+            dry_run,
+            skills,
+            ci,
+        } => install::install(cwd, dry_run, install::Parts { skills, ci })
             .map(|report| output::success(&report, for_human, install::render)),
         Request::AddSource { from, date } => read_input(from.as_deref(), cwd)
             .and_then(|(name, text)| add_source::parse_input(&name, &text))

@@ -56,7 +56,7 @@ impl Command {
         match self {
             Command::Install => "설정 파일, 문서 뼈대, 에이전트 안내문, 스킬, CI 워크플로 설치",
             Command::Uninstall => "설치한 안내문 구간, 스킬, CI 워크플로 제거",
-            Command::Init => "기존 이력 확보와 첫 디비 구축",
+            Command::Init => "기존 프로젝트 도입의 진행 상태",
             Command::Add => "결정, 사고, 소스 노트 추가",
             Command::Why => "코드나 기능의 배경 조회",
             Command::Impact => "변경의 영향 범위 파악",
@@ -86,8 +86,8 @@ pub enum Invocation {
 pub enum Request {
     Build,
     Check {
-        /// 원본의 최신 판 목록 파일.
-        origins: Option<String>,
+        /// 원본의 최신 판 목록 파일. 여러 개를 받아 합칩니다.
+        origins: Vec<String>,
         /// 바뀐 파일을 구할 비교 기준 ref.
         base: Option<String>,
         /// PR 설명을 담은 파일.
@@ -114,6 +114,12 @@ pub enum Request {
         dry_run: bool,
         /// `--no-skills`면 거짓이다.
         skills: bool,
+        /// `--no-ci`면 거짓이다.
+        ci: bool,
+    },
+    Init {
+        /// 진행 상태를 볼 폴더. 없으면 프로젝트 홈 전체다.
+        scope: Option<String>,
     },
     Sync {
         /// 비교 기준 ref.
@@ -125,8 +131,6 @@ pub enum Request {
         from: Option<String>,
         date: Option<String>,
     },
-    /// 아직 구현하지 않은 명령.
-    Pending(Command),
 }
 
 impl Request {
@@ -134,7 +138,12 @@ impl Request {
         match command {
             Command::Build => Request::Build,
             Command::Check => Request::Check {
-                origins: matches.get_one::<String>(ORIGINS).cloned(),
+                origins: matches
+                    .get_many::<String>(ORIGINS)
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect(),
                 base: matches.get_one::<String>(BASE).cloned(),
                 pr_body: matches.get_one::<String>(PR_BODY).cloned(),
                 report: matches.get_flag(REPORT),
@@ -169,6 +178,7 @@ impl Request {
             Command::Install => Request::Install {
                 dry_run: matches.get_flag(DRY_RUN),
                 skills: !matches.get_flag(NO_SKILLS),
+                ci: !matches.get_flag(NO_CI),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -176,13 +186,15 @@ impl Request {
                     date: sub.get_one::<String>(DATE).cloned(),
                 },
                 Some((name, sub)) => Request::Add(Box::new(new_record(name, sub))),
-                None => Request::Pending(Command::Add),
+                None => unreachable!("clap이 add의 하위 명령을 요구한다"),
+            },
+            Command::Init => Request::Init {
+                scope: matches.get_one::<String>(SCOPE).cloned(),
             },
             Command::Sync => Request::Sync {
                 base: matches.get_one::<String>(BASE).cloned().unwrap_or_default(),
                 dry_run: matches.get_flag(DRY_RUN),
             },
-            other => Request::Pending(other),
         }
     }
 }
@@ -264,7 +276,9 @@ const ORIGINS: &str = "origins";
 const BASE: &str = "base";
 const PR_BODY: &str = "pr-body";
 const REPORT: &str = "report";
+const SCOPE: &str = "scope";
 const NO_SKILLS: &str = "no-skills";
+const NO_CI: &str = "no-ci";
 const WITH_CONFIG: &str = "with-config";
 
 fn parse_slug(value: &str) -> Result<String, String> {
@@ -331,7 +345,12 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
         Command::Check => definition
-            .arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일"))
+            .arg(
+                Arg::new(ORIGINS)
+                    .long(ORIGINS)
+                    .value_name("JSON 파일")
+                    .action(ArgAction::Append),
+            )
             .arg(Arg::new(BASE).long(BASE).value_name("ref"))
             .arg(Arg::new(PR_BODY).long(PR_BODY).value_name("파일"))
             .arg(Arg::new(REPORT).long(REPORT).action(ArgAction::SetTrue)),
@@ -342,6 +361,7 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(WITH_CONFIG)
                     .action(ArgAction::SetTrue),
             ),
+        Command::Init => definition.arg(Arg::new(SCOPE).long(SCOPE).value_name("폴더")),
         Command::Sync => definition
             .arg(Arg::new(BASE).long(BASE).required(true).value_name("ref"))
             .arg(Arg::new(DRY_RUN).long(DRY_RUN).action(ArgAction::SetTrue)),
@@ -351,7 +371,8 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                 Arg::new(NO_SKILLS)
                     .long(NO_SKILLS)
                     .action(ArgAction::SetTrue),
-            ),
+            )
+            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue)),
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -486,7 +507,7 @@ mod tests {
                 Command::Check => (
                     vec!["check"],
                     Request::Check {
-                        origins: None,
+                        origins: Vec::new(),
                         base: None,
                         pr_body: None,
                         report: false,
@@ -534,6 +555,13 @@ mod tests {
                     Request::Install {
                         dry_run: false,
                         skills: true,
+                        ci: true,
+                    },
+                ),
+                Command::Init => (
+                    vec!["init", "--scope", "server"],
+                    Request::Init {
+                        scope: Some("server".to_string()),
                     },
                 ),
                 Command::Sync => (
@@ -543,7 +571,6 @@ mod tests {
                         dry_run: true,
                     },
                 ),
-                other => (vec![other.name()], Request::Pending(other)),
             };
             assert_eq!(
                 parse(&args(&argv)),
