@@ -39,7 +39,11 @@ pub fn build(config: &Config) -> Result<BuildReport, LoreError> {
     let mut graph = graph::build(&corpus, &config.root, &files)
         .map_err(|problems| LoreError::InvalidSources { problems })?;
     let analysis = config.analysis.as_ref().map(|_| {
-        let result = analysis::analyze(&config.root, &files);
+        let workspace = config
+            .analysis
+            .as_ref()
+            .is_some_and(|analysis| analysis.workspace.as_deref() == Some("pnpm"));
+        let result = analysis::analyze(&config.root, &files, workspace);
         graph::add_analysis(&mut graph, &config.root, &result);
         result.report
     });

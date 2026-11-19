@@ -31,6 +31,7 @@
 | `src/git.rs`         | 추적 파일 목록, 현재 커밋, 작업 트리 상태            |
 | `src/graph.rs`       | 소스와 파일로 노드와 엣지 계산                       |
 | `src/analysis.rs`    | 정적 분석: JS·TS의 import로 파일 → 파일 의존         |
+| `src/resolve.rs`     | 모듈 경로 해석: 상대 경로, tsconfig 별칭, pnpm 워크스페이스 |
 | `src/db.rs`          | SQLite 스키마와 쓰기                                 |
 | `src/index.rs`       | `docs/INDEX.md` 본문 만들기                          |
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
