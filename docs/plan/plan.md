@@ -554,7 +554,7 @@ lore sync --base <ref> [--dry-run]
 
 - **인자**: 모든 커넥터는 `--channel <채널 ID>`를 받아 후보의 `channel`에 그대로 적습니다. 채널 ID는 프로젝트의 `lore.config`가 정하므로 커넥터가 알 수 없습니다. 범위를 좁히는 인자(`--since`, `--limit` 등)는 커넥터마다 정합니다.
 - **후보 출력**: `{"ok": true, "candidates": [...]}`. 후보는 `lore add source` 입력에서 `slug`와 `body`를 뺀 항목(`title`, `kind`, `channel`, `origin`, `origin_version`, `occurred_at`)과, 정제하기 전 원문 `text`입니다. 무엇을 소스 노트로 만들지는 사람이 고르고, 정제와 `slug`는 스킬이 정합니다.
-- **최신 판 출력**: `--origins <소스 폴더>`를 주면 소스 노트 중 그 커넥터가 맡는 원본의 최신 판을 `[{"origin": ..., "origin_version": ...}]`로 냅니다. `lore check --origins`에 그대로 넘기도록 이 출력만 `ok`로 감싸지 않습니다.
+- **최신 판 출력**: `--origins <소스 폴더>`를 주면 소스 노트 중 그 커넥터가 맡는 원본의 최신 판을 `[{"origin": ..., "origin_version": ...}]`로 냅니다. `lore check --origins`에 그대로 넘기도록 이 출력만 `ok`로 감싸지 않습니다. 소스 노트는 코어와 같은 규칙으로 찾습니다(하위 폴더까지, `_`와 `.`로 시작하는 항목은 건너뜀).
 - **오류**: `{"ok": false, "error": {"code": ..., "message": ...}}`를 표준 출력으로 내고 0이 아닌 종료 코드로 끝납니다. 부르는 쪽은 종료 코드를 먼저 봅니다.
 - **날짜**: `occurred_at`은 `YYYY-MM-DD`이고, 커넥터를 실행한 환경의 로컬 시간대로 봅니다(9장 "기록 날짜의 시간대").
 
