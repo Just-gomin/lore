@@ -419,7 +419,7 @@ fn spec_update_check(
         ID,
         LABEL,
         findings,
-        "스펙 본문을 바뀐 코드에 맞게 고치세요. 영향이 없으면 PR 설명에 'lore: no-impact <스펙 ID> <사유>'를 적으세요.",
+        "스펙 본문을 바뀐 코드에 맞게 고치세요. 머리말만 고친 것은 본문을 고친 것으로 치지 않습니다. 영향이 없으면 PR 설명에 'lore: no-impact <스펙 ID> <사유>'를 적으세요.",
     ))
 }
 
@@ -674,7 +674,7 @@ fn render_finding(finding: &Finding) -> Option<String> {
     Some(match (&finding.spec, finding.outcome) {
         (_, Outcome::Updated) => return None,
         (Some(spec), Outcome::Warned) => {
-            format!("{spec} 스펙이 바뀌지 않았습니다. 바뀐 파일: {files}")
+            format!("{spec} 스펙의 본문이 바뀌지 않았습니다. 바뀐 파일: {files}")
         }
         (Some(spec), Outcome::NoImpact) => format!(
             "{spec} 영향 없음으로 넘김: {}",
