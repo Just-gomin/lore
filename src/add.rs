@@ -119,7 +119,12 @@ pub fn add(config: &Config, record: &NewRecord) -> Result<AddReport, LoreError> 
 
 /// 머리말과 템플릿 본문. 머리말의 모양은 블로그 레포의 손으로 쓴 템플릿과 같다.
 fn render(record: &NewRecord, id: &str) -> String {
-    let mut text = format!("---\nid: {id}\ntitle: {}\n", scalar(&record.title));
+    // 스펙 ID는 슬러그 그대로라 `2026`이나 `true`처럼 YAML이 문자열이 아닌 값으로 읽는 것도 있습니다.
+    let mut text = format!(
+        "---\nid: {}\ntitle: {}\n",
+        scalar(id),
+        scalar(&record.title)
+    );
     let body = match record.kind {
         Kind::Decision => {
             text.push_str(&format!(

@@ -244,4 +244,16 @@ fn 없는_상위_스펙을_가리키면_스펙을_만들지_않고_빈_목록은
         &["add", "spec", "--slug", "payment", "--title", "결제"],
     );
     assert_eq!(json(&output)["error"]["code"], "id_exists");
+
+    // YAML이 숫자로 읽는 슬러그도 따옴표로 감싸 문자열 ID로 남긴다.
+    let output = lore_in(
+        dir.path(),
+        &["add", "spec", "--slug", "2026", "--title", "연도"],
+    );
+    assert!(output.status.success(), "{}", stdout(&output));
+    assert!(
+        std::fs::read_to_string(dir.path().join("docs/specs/2026.md"))
+            .unwrap()
+            .starts_with("---\nid: \"2026\"\n")
+    );
 }
