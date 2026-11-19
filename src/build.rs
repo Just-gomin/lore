@@ -121,8 +121,12 @@ pub fn render(report: &BuildReport) -> String {
     }
     if let Some(analysis) = &report.analysis {
         text.push_str(&format!(
-            "\n  분석    파일 {}개, 의존 {}개, 해석하지 못한 import {}개",
-            analysis.files, analysis.edges, analysis.unresolved
+            "\n  분석    파일 {}개, 의존 {}개, 해석하지 못한 import {}개, 심볼 {}개, 심볼 의존 {}개",
+            analysis.files,
+            analysis.edges,
+            analysis.unresolved,
+            analysis.symbols,
+            analysis.symbol_edges
         ));
         for file in &analysis.parse_errors {
             text.push_str(&format!("\n    문법 오류  {file}"));
