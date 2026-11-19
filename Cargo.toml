@@ -4,6 +4,7 @@ members = [
     "connectors/common",
     "connectors/git",
     "connectors/github",
+    "extractors/image",
     "extractors/markdown",
     "extractors/xlsx",
 ]

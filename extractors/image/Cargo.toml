@@ -1,0 +1,15 @@
+[package]
+name = "lore-extractor-image"
+version.workspace = true
+edition.workspace = true
+description = "이미지의 글자를 tesseract로 읽어 lore 소스 노트 후보로 바꾸는 추출기"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+kamadak-exif = "0.6.2"
+lore-connector-common = { path = "../../connectors/common" }
+
+[dev-dependencies]
+serde_json.workspace = true
+tempfile.workspace = true
