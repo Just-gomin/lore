@@ -116,6 +116,19 @@ fn 소스_노트_스킬의_입력_예시는_입력_검사를_통과한다() {
     let examples = code_blocks(text, "json");
     assert_eq!(examples.len(), 1);
     lore::add_source::parse_input("lore-source", &examples[0]).unwrap();
+    // 추출기 예시는 표준 입력으로 넘기는 JSON이다. 꼭 있어야 할 항목이 들었는지 본다.
+    let extractor = code_blocks(text, "sh")
+        .into_iter()
+        .find(|block| block.contains("lore-extractor-"))
+        .expect("추출기 예시가 있다");
+    let json = extractor
+        .split('\'')
+        .nth(1)
+        .expect("작은따옴표로 감싼 입력 JSON");
+    let input: serde_json::Value = serde_json::from_str(json).unwrap();
+    for key in ["file", "channel", "origin"] {
+        assert!(input[key].is_string(), "{key}");
+    }
 }
 
 #[test]

@@ -69,6 +69,7 @@
 | `tests/sync.rs`      | 고정 예제로 `lore sync`를 확인하는 테스트            |
 | `tests/init.rs`      | 고정 예제로 `lore init`을 확인하는 테스트            |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
+| `tests/extract.rs`   | 엑셀 추출기에서 결정의 근거 조회까지 잇는 통합 확인 |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
 | `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력, `analysis`는 정적 분석용 |
 
