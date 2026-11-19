@@ -23,7 +23,7 @@ def serial(value):
 
 
 def xlsx(path):
-    strings = ["항목", "담당", "날짜", "금액", "두 배", "재시도 횟수", "운영", "간격", "비고", "a|b", "줄\n바꿈", "비밀"]
+    strings = ["항목", "담당", "날짜", "금액", "두 배", "재시도 횟수", "운영", "간격", "비고", "a|b", "줄\n바꿈", "비밀", "시작"]
     s = {text: str(i) for i, text in enumerate(strings)}
 
     def sst():
@@ -40,6 +40,8 @@ def xlsx(path):
             f"<sheetData>{rows}</sheetData>{merges}</worksheet>"
         )
 
+    # Python 3.12 전에는 f-string 식 안에 역슬래시를 쓸 수 없다.
+    line_break = "줄\n바꿈"
     date = serial(datetime.datetime(2026, 11, 3))
     stamp = serial(datetime.datetime(2026, 11, 4, 10, 30))
     meeting = sheet(
@@ -57,8 +59,10 @@ def xlsx(path):
         '<c r="E4"><f>D4*2</f><v>3</v></c></row>'
         '<row r="5">'
         f'<c r="A5" t="s"><v>{s["비고"]}</v></c><c r="B5" t="s"><v>{s["a|b"]}</v></c>'
-        f'<c r="C5" t="s"><v>{s["줄\n바꿈"]}</v></c>'
-        '<c r="E5" t="e"><f>1/0</f><v>#DIV/0!</v></c></row>',
+        f'<c r="C5" t="s"><v>{s[line_break]}</v></c>'
+        '<c r="E5" t="e"><f>1/0</f><v>#DIV/0!</v></c></row>'
+        '<row r="6">'
+        f'<c r="A6" t="s"><v>{s["시작"]}</v></c><c r="C6" s="3"><v>0.4375</v></c></row>',
         '<mergeCells count="1"><mergeCell ref="A4:B4"/></mergeCells>',
     )
     secret = sheet(f'<row r="1"><c r="A1" t="s"><v>{s["비밀"]}</v></c></row>')
@@ -110,9 +114,10 @@ def xlsx(path):
               '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
               '<fonts count="1"><font/></fonts><fills count="1"><fill/></fills><borders count="1"><border/></borders>'
               '<cellStyleXfs count="1"><xf numFmtId="0"/></cellStyleXfs>'
-              '<cellXfs count="3"><xf numFmtId="0" xfId="0"/>'
+              '<cellXfs count="4"><xf numFmtId="0" xfId="0"/>'
               '<xf numFmtId="14" xfId="0" applyNumberFormat="1"/>'
-              '<xf numFmtId="22" xfId="0" applyNumberFormat="1"/></cellXfs>'
+              '<xf numFmtId="22" xfId="0" applyNumberFormat="1"/>'
+              '<xf numFmtId="20" xfId="0" applyNumberFormat="1"/></cellXfs>'
               '</styleSheet>')
         write(zf, "xl/sharedStrings.xml", sst())
         write(zf, "xl/worksheets/sheet1.xml", meeting)
@@ -126,6 +131,7 @@ def ods(path):
         'xmlns:table="urn:oasis:names:tc:opendocument:xmlns:table:1.0" '
         'xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0" '
         'xmlns:of="urn:oasis:names:tc:opendocument:xmlns:of:1.2" '
+        'xmlns:calcext="urn:org:documentfoundation:names:experimental:calc:xmlns:calcext:1.0" '
         'xmlns:dc="http://purl.org/dc/elements/1.1/" '
         'xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0" '
         'xmlns:manifest="urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"'
@@ -149,7 +155,11 @@ def ods(path):
         + "<table:covered-table-cell/>"
         + '<table:table-cell office:value-type="date" office:date-value="2026-11-04T10:30:00"><text:p>2026-11-04 10:30</text:p></table:table-cell>'
         + number(1.5) + number(3, "of:=[.D4]*2"),
-        text("비고") + text("a|b") + '<table:table-cell office:value-type="string"><text:p>줄</text:p><text:p>바꿈</text:p></table:table-cell>' + empty + empty,
+        text("비고") + text("a|b") + '<table:table-cell office:value-type="string"><text:p>줄</text:p><text:p>바꿈</text:p></table:table-cell>' + empty
+        # LibreOffice가 오류 값을 저장하는 꼴
+        + '<table:table-cell table:formula="of:=1/0" office:value-type="string" office:string-value="" calcext:value-type="error"><text:p>#DIV/0!</text:p></table:table-cell>',
+        text("시작") + empty
+        + '<table:table-cell office:value-type="time" office:time-value="PT10H30M00S"><text:p>10:30</text:p></table:table-cell>',
     ]
     body = "".join(f"<table:table-row>{row}</table:table-row>" for row in rows)
     content = (
@@ -158,8 +168,8 @@ def ods(path):
         '<style:style style:name="shown" style:family="table"><style:table-properties table:display="true"/></style:style>'
         '<style:style style:name="hidden" style:family="table"><style:table-properties table:display="false"/></style:style>'
         '</office:automatic-styles><office:body><office:spreadsheet>'
-        f'<table:table table:name="회의" table:style-name="shown">{body}</table:table>'
-        f'<table:table table:name="내부" table:style-name="hidden"><table:table-row>{text("비밀")}</table:table-row></table:table>'
+        f'<table:table table:name="회의" table:style-name="shown"><table:table-column table:number-columns-repeated="5"/>{body}</table:table>'
+        f'<table:table table:name="내부" table:style-name="hidden"><table:table-column/><table:table-row>{text("비밀")}</table:table-row></table:table>'
         '</office:spreadsheet></office:body></office:document-content>'
     )
     meta = (

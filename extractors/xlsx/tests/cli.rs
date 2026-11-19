@@ -33,7 +33,7 @@ fn input(name: &str) -> serde_json::Value {
     })
 }
 
-const TABLE: &str = "## 회의\n\n| 항목 | 담당 | 날짜 | 금액 | 두 배 |\n| --- | --- | --- | --- | --- |\n| 재시도 횟수 | 운영 | 2026-11-03 | 3 | 6 |\n| 간격 |  | 2026-11-04 10:30 | 1.5 | 3 |\n";
+const EXPECTED: &str = "## 회의\n\n| 항목 | 담당 | 날짜 | 금액 | 두 배 |\n| --- | --- | --- | --- | --- |\n| 재시도 횟수 | 운영 | 2026-11-03 | 3 | 6 |\n| 간격 |  | 2026-11-04 10:30 | 1.5 | 3 |\n| 비고 | a\\|b | 줄<br>바꿈 |  | #DIV/0! |\n| 시작 |  | 10:30:00 |  |  |\n\n(숨긴 시트 1개는 넣지 않았습니다.)";
 
 #[test]
 fn 엑셀의_보이는_시트를_표로_내고_숨긴_시트는_수만_적는다() {
@@ -49,12 +49,8 @@ fn 엑셀의_보이는_시트를_표로_내고_숨긴_시트는_수만_적는다
     );
     let text = candidate["text"].as_str().unwrap();
     // 가운데 빈 행은 빠지고, 병합 셀은 왼쪽 위에만, 수식은 저장된 값, 오류 값은 그대로다.
-    assert_eq!(
-        text,
-        format!(
-            "{TABLE}| 비고 | a\\|b | 줄<br>바꿈 |  | #DIV/0! |\n\n(숨긴 시트 1개는 넣지 않았습니다.)"
-        )
-    );
+    // 시각만 든 칸은 H:MM:SS로 쓴다.
+    assert_eq!(text, EXPECTED);
     assert!(!text.contains("비밀"));
 }
 
@@ -66,10 +62,7 @@ fn ods도_같은_규칙으로_읽는다() {
     assert_eq!(candidate["title"], "정산 회의 자료");
     // 시간대가 없는 dc:date는 적힌 날짜 그대로다.
     assert_eq!(candidate["occurred_at"], "2026-11-03");
-    assert_eq!(
-        candidate["text"],
-        format!("{TABLE}| 비고 | a\\|b | 줄<br>바꿈 |  |  |\n\n(숨긴 시트 1개는 넣지 않았습니다.)")
-    );
+    assert_eq!(candidate["text"], EXPECTED);
 }
 
 #[test]
@@ -81,7 +74,7 @@ fn 같은_파일은_출력이_같고_행_상한을_바꿀_수_있다() {
     limited["max_rows"] = 1.into();
     let (_, json) = run(&limited);
     let text = json["candidates"][0]["text"].as_str().unwrap();
-    assert!(text.contains("(남은 행 2개는 넣지 않았습니다.)"), "{text}");
+    assert!(text.contains("(남은 행 3개는 넣지 않았습니다.)"), "{text}");
     assert!(!text.contains("간격"));
 
     limited["max_rows"] = 0.into();
