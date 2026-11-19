@@ -49,6 +49,7 @@
 | `connectors/common/` | 커넥터와 추출기가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석, 추출기 입력 |
 | `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `connectors/github/` | `lore-connector-github`: GitHub PR과 이슈에서 후보 뽑기, 최신 판 목록 |
+| `extractors/image/`  | `lore-extractor-image`: 이미지의 글자를 tesseract로 읽어 후보로 |
 | `extractors/markdown/` | `lore-extractor-markdown`: 마크다운과 텍스트 파일을 후보로 |
 | `extractors/xlsx/`   | `lore-extractor-xlsx`: 엑셀과 ods의 보이는 시트를 마크다운 표로 |
 | `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬(`lore init` 스킬 포함), 워크플로 |

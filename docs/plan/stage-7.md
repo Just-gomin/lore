@@ -105,13 +105,20 @@
 
 ### 3. 이미지 추출기
 
-- [ ] `lore-extractor-image`를 만듭니다. `tesseract <파일> stdout -l <언어>`를 부르고, 그 출력을 `text`로 씁니다. 언어는 입력의 `lang`, 없으면 `kor+eng`입니다. tesseract 실행 파일은 `PATH`에서 찾고, `LORE_TESSERACT` 환경 변수로 바꿀 수 있습니다.
-- [ ] tesseract가 없거나 `LORE_TESSERACT`가 없는 파일을 가리키면 `tool_missing` 오류에 설치 방법(`brew install tesseract`, `apt install tesseract-ocr`)을 적어 끝납니다. tesseract가 실패하면 `tool_failed`로 감싸고, 메시지에 언어 데이터 설치 방법(`brew install tesseract-lang`, `apt install tesseract-ocr-kor`)을 적습니다. 기본 설치에는 영어 데이터만 있기 때문입니다.
-- [ ] 날짜는 EXIF의 촬영 시각(`DateTimeOriginal`, 없으면 `DateTime`)의 날짜 부분을 그대로 씁니다. 스크린숏처럼 EXIF가 없으면 `occurred_at_missing`입니다.
-- [ ] `text` 맨 위에 어떤 도구로 읽었는지(`tesseract <판>`, 언어) 한 줄을 남깁니다. 판은 `tesseract --version`의 첫 줄이며, 4.x는 표준 오류로 내므로 표준 출력과 표준 오류를 모두 봅니다. 스킬이 인식 오류 가능성을 알고 정제하게 하기 위해서입니다. 인식한 글이 없으면 그 줄과 함께 "인식한 글자가 없습니다"를 냅니다.
-- [ ] 테스트는 정해진 글을 내는 가짜 tesseract(테스트가 만드는 스크립트)를 `Command::env("LORE_TESSERACT", ...)`로 넘겨 합니다. 실제 tesseract로 하는 시험도 하나 둡니다. 이 PR에서 CI(`.github/workflows/ci.yaml`)에 `sudo apt-get install -y tesseract-ocr`를 더하고, 고정 이미지는 영어 글자만 담아 `lang: "eng"`로 읽으며, 출력에 그 낱말이 들었는지만 봅니다. tesseract 판마다 출력이 조금씩 다르기 때문입니다. tesseract가 없는 로컬 환경에서는 이 시험이 실패하므로, 실패 메시지에 설치 방법을 적습니다.
+- [x] `lore-extractor-image`를 만듭니다. `tesseract <파일> stdout -l <언어>`를 부르고, 그 출력을 `text`로 씁니다. 언어는 입력의 `lang`, 없으면 `kor+eng`입니다. tesseract 실행 파일은 `PATH`에서 찾고, `LORE_TESSERACT` 환경 변수로 바꿀 수 있습니다.
+- [x] tesseract가 없거나 `LORE_TESSERACT`가 없는 파일을 가리키면 `tool_missing` 오류에 설치 방법(`brew install tesseract`, `apt install tesseract-ocr`)을 적어 끝납니다. tesseract가 실패하면 `tool_failed`로 감싸고, 메시지에 언어 데이터 설치 방법(`brew install tesseract-lang`, `apt install tesseract-ocr-kor`)을 적습니다. 기본 설치에는 영어 데이터만 있기 때문입니다.
+- [x] 날짜는 EXIF의 촬영 시각(`DateTimeOriginal`, 없으면 `DateTime`)의 날짜 부분을 그대로 씁니다. 스크린숏처럼 EXIF가 없으면 `occurred_at_missing`입니다.
+- [x] `text` 맨 위에 어떤 도구로 읽었는지(`tesseract <판>`, 언어) 한 줄을 남깁니다. 판은 `tesseract --version`의 첫 줄이며, 4.x는 표준 오류로 내므로 표준 출력과 표준 오류를 모두 봅니다. 스킬이 인식 오류 가능성을 알고 정제하게 하기 위해서입니다. 인식한 글이 없으면 그 줄과 함께 "인식한 글자가 없습니다"를 냅니다.
+- [x] 테스트는 정해진 글을 내는 가짜 tesseract(테스트가 만드는 스크립트)를 `Command::env("LORE_TESSERACT", ...)`로 넘겨 합니다. 실제 tesseract로 하는 시험도 하나 둡니다. 이 PR에서 CI(`.github/workflows/ci.yaml`)에 `sudo apt-get install -y tesseract-ocr`를 더하고, 고정 이미지는 영어 글자만 담아 `lang: "eng"`로 읽으며, 출력에 그 낱말이 들었는지만 봅니다. tesseract 판마다 출력이 조금씩 다르기 때문입니다. tesseract가 없는 로컬 환경에서는 설치 방법을 알리고 건너뛰되, CI(`CI` 환경 변수가 있음)에서는 실패합니다.
 
 완료 기준: 가짜 tesseract로 출력, 언어 인자, `tool_missing`, `tool_failed`, EXIF 날짜와 `occurred_at_missing`을 확인합니다. CI에서 실제 tesseract가 고정 이미지의 글자를 읽습니다.
+
+정한 것: 다음을 더 정했습니다.
+
+- 파일 머리 바이트로 PNG와 JPEG만 받고, 그 밖의 형식은 tesseract를 부르지 않고 `unreadable_file`로 냅니다.
+- `lang`은 영문자, 숫자, `_`, `+`만 받습니다. tesseract에 다른 옵션이 섞여 들어가지 않게 하기 위해서입니다.
+- tesseract가 쪽 끝에 내는 폼 피드는 뺍니다.
+- 고정 이미지는 같은 폴더의 `make.py`가 Pillow로 만듭니다.
 
 ### 4. 스킬과 통합 확인
 

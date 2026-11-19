@@ -25,6 +25,10 @@ jobs:
       - name: "Lint"
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
+      # 이미지 추출기의 실제 OCR 시험에 씁니다. 영어 데이터만 씁니다.
+      - name: "tesseract 설치"
+        run: sudo apt-get update -q && sudo apt-get install -y -q tesseract-ocr && tesseract --version
+
       - name: "Test"
         run: cargo test --workspace --locked
 
