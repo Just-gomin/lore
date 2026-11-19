@@ -6,7 +6,7 @@
 use std::process::ExitCode;
 
 use lore_connector_common::ConnectorError;
-use lore_connector_common::extractor::{self, Extracted, is_date};
+use lore_connector_common::extractor::{self, Extracted, local_date};
 use serde_yaml_ng::Value;
 
 fn main() -> ExitCode {
@@ -27,15 +27,26 @@ fn extract(bytes: &[u8]) -> Result<Extracted, ConnectorError> {
             .filter(|value| !value.is_empty())
     };
     let title = field("title").or_else(|| first_heading(body));
-    let occurred_at = field("date").filter(|date| is_date(date));
+    let occurred_at = field("date").and_then(|date| local_date(&date));
     Ok(Extracted {
         title,
         occurred_at,
-        text: body.trim().to_string(),
+        text: trim_blank_lines(body).to_string(),
     })
 }
 
+/// 앞뒤의 빈 줄만 뺍니다. 첫 줄의 들여쓰기(들여 쓴 코드 블록)는 남깁니다.
+fn trim_blank_lines(text: &str) -> &str {
+    let start = text
+        .split_inclusive('\n')
+        .take_while(|line| line.trim().is_empty())
+        .map(str::len)
+        .sum();
+    text[start..].trim_end()
+}
+
 /// 머리말(`---`로 둘러싼 YAML)과 본문을 나눕니다. 머리말이 없거나 YAML로 읽지 못하면 전체가 본문입니다.
+/// 비었거나 매핑이 아닌 머리말도 떼어 내되, 항목은 매핑에서만 읽습니다.
 fn split_front_matter(text: &str) -> (Option<Value>, &str) {
     let normalized = text
         .strip_prefix("---\n")
@@ -49,8 +60,8 @@ fn split_front_matter(text: &str) -> (Option<Value>, &str) {
             let yaml = &rest[..offset];
             let body = &rest[offset + line.len()..];
             return match serde_yaml_ng::from_str::<Value>(yaml) {
-                Ok(value) if value.is_mapping() => (Some(value), body),
-                _ => (None, text),
+                Ok(value) => (value.is_mapping().then_some(value), body),
+                Err(_) => (None, text),
             };
         }
         offset += line.len();
@@ -58,20 +69,53 @@ fn split_front_matter(text: &str) -> (Option<Value>, &str) {
     (None, text)
 }
 
-/// 첫 `# ` 제목. 코드 블록 안은 보지 않습니다.
+/// 첫 `#` 제목(ATX 1단계). 코드 블록 안은 보지 않습니다.
 fn first_heading(body: &str) -> Option<String> {
-    let mut fenced = false;
+    // 열린 코드 블록의 울타리 글자와 길이
+    let mut fence: Option<(char, usize)> = None;
     for line in body.lines() {
-        let trimmed = line.trim_start();
-        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
-            fenced = !fenced;
+        let indent = line.len() - line.trim_start_matches(' ').len();
+        if indent > 3 {
             continue;
         }
-        if !fenced && let Some(title) = line.strip_prefix("# ") {
-            let title = title.trim().trim_end_matches('#').trim();
-            if !title.is_empty() {
-                return Some(title.to_string());
+        let trimmed = &line[indent..];
+        let marker = trimmed.chars().next().filter(|c| *c == '`' || *c == '~');
+        if let Some(marker) = marker {
+            let run = trimmed.chars().take_while(|c| *c == marker).count();
+            if run >= 3 {
+                match fence {
+                    None => fence = Some((marker, run)),
+                    Some((open, length))
+                        if open == marker && run >= length && trimmed[run..].trim().is_empty() =>
+                    {
+                        fence = None
+                    }
+                    Some(_) => {}
+                }
+                continue;
             }
+        }
+        if fence.is_some() {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix('#') else {
+            continue;
+        };
+        if !rest.is_empty() && !rest.starts_with([' ', '\t']) {
+            continue;
+        }
+        let mut title = rest.trim();
+        // 끝의 `#` 묶음은 앞에 공백이 있을 때만 닫는 표시입니다(`C#`은 그대로).
+        if let Some((head, tail)) = title.rsplit_once([' ', '\t'])
+            && !tail.is_empty()
+            && tail.chars().all(|c| c == '#')
+        {
+            title = head.trim_end();
+        } else if title.chars().all(|c| c == '#') {
+            title = "";
+        }
+        if !title.is_empty() {
+            return Some(title.to_string());
         }
     }
     None
@@ -105,6 +149,34 @@ mod tests {
         assert_eq!(found.occurred_at, None);
         let found = extract("---\n: [\n---\n본문".as_bytes()).unwrap();
         assert!(found.text.starts_with("---"));
+    }
+
+    #[test]
+    fn 코드_블록의_울타리는_같은_글자와_길이로_닫는다() {
+        let found = extract("````\n```\n# inside\n````\n# Real".as_bytes()).unwrap();
+        assert_eq!(found.title.as_deref(), Some("Real"));
+        let found = extract("~~~\n```py\n~~~\n# Real".as_bytes()).unwrap();
+        assert_eq!(found.title.as_deref(), Some("Real"));
+    }
+
+    #[test]
+    fn 제목의_샵과_들여쓰기를_규칙대로_읽는다() {
+        let title = |text: &str| extract(text.as_bytes()).unwrap().title;
+        assert_eq!(title("# Learn C#").as_deref(), Some("Learn C#"));
+        assert_eq!(title("# 제목 ##").as_deref(), Some("제목"));
+        assert_eq!(title("   # 들여씀").as_deref(), Some("들여씀"));
+        assert_eq!(title("#\t탭").as_deref(), Some("탭"));
+        assert_eq!(title("    # 코드").as_deref(), None);
+        assert_eq!(title("#해시태그").as_deref(), None);
+    }
+
+    #[test]
+    fn 빈_머리말도_떼어_내고_시각이_든_날짜는_날짜만_쓴다() {
+        let found = extract("---\n---\n# H\nbody".as_bytes()).unwrap();
+        assert_eq!(found.text, "# H\nbody");
+        let found = extract("---\ndate: 2026-11-03 10:00:00\n---\n\n    코드".as_bytes()).unwrap();
+        assert_eq!(found.occurred_at.as_deref(), Some("2026-11-03"));
+        assert_eq!(found.text, "    코드");
     }
 
     #[test]

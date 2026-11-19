@@ -601,7 +601,7 @@ lore sync --base <ref> [--dry-run]
 - **출력**: 커넥터의 후보 출력과 같은 `{"ok": true, "candidates": [...]}`이고, 파일 하나에 후보 하나입니다. `lore add source`에는 후보에서 `text`를 빼고 `slug`와 `body`를 더해 넘깁니다.
 - **원본의 판**: `origin_version`은 파일 내용의 sha256을 소문자 16진수로 쓴 것(`shasum -a 256`과 같은 값)입니다. 링크가 없는 파일은 Drive에 변환하지 않고 올려, 올린 파일의 해시가 원본과 같게 합니다.
 - **제목과 날짜**: 입력에 없으면 파일에서 찾고(마크다운 머리말, 엑셀 문서 속성, 이미지 EXIF), 제목은 마지막으로 확장자를 뺀 파일 이름을 씁니다. 날짜를 찾지 못하면 `occurred_at_missing`으로 끝나고, 부르는 쪽이 `occurred_at`을 넘겨 다시 부릅니다. 시간대가 있는 값은 실행 환경의 로컬 시간대 날짜로, 없는 값은 적힌 날짜 그대로 씁니다. 파일 수정 시각은 복사할 때마다 바뀌어 쓰지 않습니다.
-- **오류**: 커넥터와 같은 `{"ok": false, "error": {"code": ..., "message": ...}}`와 0이 아닌 종료 코드입니다. 공통 코드는 `invalid_input`, `io`, `unreadable_file`, `occurred_at_missing`입니다.
+- **오류**: 커넥터와 같은 `{"ok": false, "error": {"code": ..., "message": ...}}`와 0이 아닌 종료 코드(입력이 잘못된 `invalid_input`은 커넥터의 사용법 오류처럼 2, 나머지는 1)입니다. 공통 코드는 `invalid_input`, `io`, `unreadable_file`, `occurred_at_missing`입니다.
 - **신선도**: 추출기는 원본(Drive 링크)을 읽지 못하므로 최신 판 목록을 내지 않습니다. 추출기로 만든 소스 노트는 `lore check --origins`에서 확인하지 못한 건수로 남습니다(9장 "소스 노트 신선도의 경계").
 - **민감도**: `excluded`, `sensitive`, 설정에 없는 채널의 파일은 추출기를 부르지 않습니다. 추출기 출력에는 원문 전체가 들기 때문입니다.
 

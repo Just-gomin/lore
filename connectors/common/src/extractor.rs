@@ -114,7 +114,7 @@ pub fn parse_input(text: &str) -> Result<(Input, Extra), ConnectorError> {
     ))
 }
 
-/// `YYYY-MM-DD` 꼴인지 봅니다. 달과 날의 범위까지 봅니다.
+/// `YYYY-MM-DD` 꼴인지 봅니다. 달은 1\~12, 날은 1\~31만 봅니다(코어의 날짜 검사와 같음).
 pub fn is_date(text: &str) -> bool {
     let parts: Vec<&str> = text.split('-').collect();
     let [year, month, day] = parts.as_slice() else {
@@ -128,6 +128,23 @@ pub fn is_date(text: &str) -> bool {
     let month: u32 = month.parse().unwrap_or(0);
     let day: u32 = day.parse().unwrap_or(0);
     (1..=12).contains(&month) && (1..=31).contains(&day)
+}
+
+/// 파일에 적힌 날짜나 시각을 `YYYY-MM-DD`로 바꿉니다. 시간대가 있는 값(RFC 3339)은 실행 환경의 로컬 날짜로,
+/// 시간대가 없는 값은 적힌 날짜 그대로 씁니다. 날짜로 시작하지 않으면 `None`입니다.
+pub fn local_date(value: &str) -> Option<String> {
+    let value = value.trim();
+    if let Ok(time) = chrono::DateTime::parse_from_rfc3339(value) {
+        return Some(
+            time.with_timezone(&chrono::Local)
+                .format("%Y-%m-%d")
+                .to_string(),
+        );
+    }
+    let date = value.get(..10)?;
+    let rest = &value[10..];
+    let ends = rest.is_empty() || rest.starts_with(['T', ' ']);
+    (ends && is_date(date)).then(|| date.to_string())
 }
 
 /// 파일 내용의 sha256을 소문자 16진수로 씁니다. `shasum -a 256`과 같은 값입니다.
@@ -146,6 +163,7 @@ pub fn candidate(
 ) -> Result<Candidate, ConnectorError> {
     let title = input
         .title
+        .filter(|title| !title.trim().is_empty())
         .or(extracted.title.filter(|title| !title.trim().is_empty()))
         .unwrap_or_else(|| {
             input
@@ -192,7 +210,12 @@ pub fn run(
         }
         Err(error) => {
             println!("{}", error_json(&error));
-            ExitCode::FAILURE
+            // 커넥터처럼 입력이 잘못됐으면 2, 나머지는 1입니다.
+            if error.code == "invalid_input" {
+                ExitCode::from(2)
+            } else {
+                ExitCode::FAILURE
+            }
         }
     }
 }
@@ -267,7 +290,28 @@ mod tests {
             occurred_at: Some("2026-11-02".to_string()),
             ..input
         };
+        assert_eq!(candidate_title(input.clone()), "회의");
+        let input = Input {
+            title: Some("  ".to_string()),
+            ..input
+        };
         assert_eq!(candidate_title(input), "회의");
+    }
+
+    #[test]
+    fn 시간대가_없는_시각은_적힌_날짜를_쓴다() {
+        assert_eq!(local_date("2026-11-03").as_deref(), Some("2026-11-03"));
+        assert_eq!(
+            local_date("2026-11-03 10:00:00").as_deref(),
+            Some("2026-11-03")
+        );
+        assert_eq!(
+            local_date("2026-11-03T10:20:30.123").as_deref(),
+            Some("2026-11-03")
+        );
+        assert!(local_date("2026-11-03T01:02:03Z").is_some());
+        assert_eq!(local_date("2026-11-033"), None);
+        assert_eq!(local_date("모름"), None);
     }
 
     fn candidate_title(input: Input) -> String {

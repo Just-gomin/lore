@@ -269,9 +269,14 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
                 )));
             }
             if let Some(other) = owners.insert(extension.clone(), command.clone()) {
-                return Err(invalid(format!(
-                    "확장자 '{extension}'가 추출기 '{other}'와 '{command}'에 함께 있습니다."
-                )));
+                let message = if other == command {
+                    format!("추출기 '{command}'의 extensions에 '{extension}'가 두 번 있습니다.")
+                } else {
+                    format!(
+                        "확장자 '{extension}'가 추출기 '{other}'와 '{command}'에 함께 있습니다."
+                    )
+                };
+                return Err(invalid(message));
             }
         }
         extractors.push(Extractor {
