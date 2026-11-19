@@ -65,7 +65,7 @@ jobs:
         run: |
           bins="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name')"
           # 설치한 워크플로가 받는 lore가 빠지면 게시하지 않습니다.
-          if ! printf '%s\n' ${bins} | grep -qx lore; then
+          if ! printf '%s\n' "${bins}" | grep -qx lore; then
             echo "실행 파일 목록에 lore가 없습니다: ${bins}" >&2
             exit 1
           fi
