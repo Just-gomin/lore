@@ -1,0 +1,8 @@
+version: 1
+
+project:
+  docs: docs
+
+analysis:
+  language: typescript
+  workspace: pnpm

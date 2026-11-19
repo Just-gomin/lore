@@ -8,7 +8,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::db::{self, Meta};
 use crate::error::LoreError;
-use crate::{git, graph, index, source};
+use crate::{analysis, git, graph, index, source};
 
 /// lore가 만드는 파일을 두는 폴더. 프로젝트 홈 기준이다.
 pub const STATE_DIR: &str = ".lore";
@@ -23,6 +23,9 @@ pub struct BuildReport {
     pub commit: Option<String>,
     pub nodes: BTreeMap<&'static str, usize>,
     pub edges: BTreeMap<&'static str, usize>,
+    /// 정적 분석 결과. 설정에 `analysis`가 없으면 없다.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub analysis: Option<analysis::AnalysisReport>,
 }
 
 pub fn db_path(config: &Config) -> PathBuf {
@@ -33,8 +36,17 @@ pub fn db_path(config: &Config) -> PathBuf {
 pub fn build(config: &Config) -> Result<BuildReport, LoreError> {
     let corpus = source::read(config)?;
     let files = git::tracked_files(&config.root)?;
-    let graph = graph::build(&corpus, &config.root, &files)
+    let mut graph = graph::build(&corpus, &config.root, &files)
         .map_err(|problems| LoreError::InvalidSources { problems })?;
+    let analysis = config.analysis.as_ref().map(|_| {
+        let workspace = config
+            .analysis
+            .as_ref()
+            .is_some_and(|analysis| analysis.workspace.as_deref() == Some("pnpm"));
+        let result = analysis::analyze(&config.root, &files, workspace);
+        graph::add_analysis(&mut graph, &config.root, &result);
+        result.report
+    });
 
     // 인덱스는 추적하는 파일이라 작업 트리 지문보다 먼저 쓴다.
     let index_path = write_index(config, &index::render(&corpus, &config.docs))?;
@@ -52,6 +64,7 @@ pub fn build(config: &Config) -> Result<BuildReport, LoreError> {
         commit,
         nodes: graph.count_nodes(),
         edges: graph.count_edges(),
+        analysis,
     })
 }
 
@@ -105,6 +118,19 @@ pub fn render(report: &BuildReport) -> String {
     );
     if let Some(commit) = &report.commit {
         text.push_str(&format!("\n  커밋    {}", &commit[..commit.len().min(12)]));
+    }
+    if let Some(analysis) = &report.analysis {
+        text.push_str(&format!(
+            "\n  분석    파일 {}개, 의존 {}개, 해석하지 못한 import {}개, 심볼 {}개, 심볼 의존 {}개",
+            analysis.files,
+            analysis.edges,
+            analysis.unresolved,
+            analysis.symbols,
+            analysis.symbol_edges
+        ));
+        for file in &analysis.parse_errors {
+            text.push_str(&format!("\n    문법 오류  {file}"));
+        }
     }
     text
 }

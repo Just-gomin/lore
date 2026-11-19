@@ -4,6 +4,7 @@
 
 pub mod add;
 pub mod add_source;
+pub mod analysis;
 pub mod build;
 pub mod check;
 pub mod cli;
@@ -20,7 +21,9 @@ pub mod install;
 pub mod output;
 pub mod query;
 pub mod report;
+pub mod resolve;
 pub mod source;
+pub mod symbols;
 pub mod sync;
 pub mod why;
 
@@ -134,7 +137,8 @@ fn execute(request: Request, cwd: &Path, for_human: bool) -> Outcome {
             dry_run,
             skills,
             ci,
-        } => install::install(cwd, dry_run, install::Parts { skills, ci })
+            init,
+        } => install::install(cwd, dry_run, install::Parts { skills, ci, init })
             .map(|report| output::success(&report, for_human, install::render)),
         Request::AddSource { from, date } => read_input(from.as_deref(), cwd)
             .and_then(|(name, text)| add_source::parse_input(&name, &text))

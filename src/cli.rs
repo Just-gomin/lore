@@ -57,7 +57,7 @@ impl Command {
             Command::Install => "설정 파일, 문서 뼈대, 에이전트 안내문, 스킬, CI 워크플로 설치",
             Command::Uninstall => "설치한 안내문 구간, 스킬, CI 워크플로 제거",
             Command::Init => "기존 프로젝트 도입의 진행 상태",
-            Command::Add => "결정, 사고, 소스 노트 추가",
+            Command::Add => "결정, 사고, 소스 노트, 스펙 추가",
             Command::Why => "코드나 기능의 배경 조회",
             Command::Impact => "변경의 영향 범위 파악",
             Command::Build => "소스를 읽어 디비로 컴파일",
@@ -116,6 +116,8 @@ pub enum Request {
         skills: bool,
         /// `--no-ci`면 거짓이다.
         ci: bool,
+        /// `--init`: `lore init` 스킬도 설치한다.
+        init: bool,
     },
     Init {
         /// 진행 상태를 볼 폴더. 없으면 프로젝트 홈 전체다.
@@ -179,6 +181,7 @@ impl Request {
                 dry_run: matches.get_flag(DRY_RUN),
                 skills: !matches.get_flag(NO_SKILLS),
                 ci: !matches.get_flag(NO_CI),
+                init: matches.get_flag(INIT),
             },
             Command::Add => match matches.subcommand() {
                 Some((SOURCE, sub)) => Request::AddSource {
@@ -199,9 +202,9 @@ impl Request {
     }
 }
 
-/// `lore add decision|incident`의 인자를 읽는다.
+/// `lore add decision|incident|spec`의 인자를 읽는다.
 fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
-    let one = |id: &str| matches.get_one::<String>(id).cloned();
+    let one = |id: &str| matches.try_get_one::<String>(id).ok().flatten().cloned();
     let many = |id: &str| -> Vec<String> {
         matches
             .try_get_many::<String>(id)
@@ -212,10 +215,10 @@ fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
             .cloned()
             .collect()
     };
-    let kind = if name == DECISION {
-        Kind::Decision
-    } else {
-        Kind::Incident
+    let kind = match name {
+        DECISION => Kind::Decision,
+        SPEC => Kind::Spec,
+        _ => Kind::Incident,
     };
     NewRecord {
         kind,
@@ -242,6 +245,14 @@ fn new_record(name: &str, matches: &clap::ArgMatches) -> NewRecord {
             .cloned()
             .unwrap_or_else(|| "inferred".to_string()),
         decisions: many(DECISIONS),
+        paths: many(PATHS),
+        tests: many(TESTS),
+        depends_on: many(DEPENDS_ON),
+        parent: matches
+            .try_get_one::<String>(PARENT)
+            .ok()
+            .flatten()
+            .cloned(),
     }
 }
 
@@ -260,6 +271,11 @@ const HOP: &str = "hop";
 const EDGES: &str = "edges";
 const DECISION: &str = "decision";
 const INCIDENT: &str = "incident";
+const SPEC: &str = "spec";
+const PATHS: &str = "paths";
+const TESTS: &str = "tests";
+const DEPENDS_ON: &str = "depends-on";
+const PARENT: &str = "parent";
 const SLUG: &str = "slug";
 const TITLE: &str = "title";
 const SPECS: &str = "specs";
@@ -279,6 +295,7 @@ const REPORT: &str = "report";
 const SCOPE: &str = "scope";
 const NO_SKILLS: &str = "no-skills";
 const NO_CI: &str = "no-ci";
+const INIT: &str = "init";
 const WITH_CONFIG: &str = "with-config";
 
 fn parse_slug(value: &str) -> Result<String, String> {
@@ -372,7 +389,8 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .long(NO_SKILLS)
                     .action(ArgAction::SetTrue),
             )
-            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue)),
+            .arg(Arg::new(NO_CI).long(NO_CI).action(ArgAction::SetTrue))
+            .arg(Arg::new(INIT).long(INIT).action(ArgAction::SetTrue)),
         Command::Add => definition.subcommand_required(true).subcommands([
             record_command(DECISION, "결정 기록 추가")
                 .arg(Arg::new(SUPERSEDES).long(SUPERSEDES))
@@ -389,6 +407,30 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                         .default_value("inferred"),
                 ),
             record_command(INCIDENT, "사고 기록 추가").arg(list_arg(DECISIONS)),
+            // 글롭에는 중괄호(`{a,b}`)가 들어갈 수 있어 쉼표로 나누지 않고 여러 번 받습니다.
+            clap::Command::new(SPEC)
+                .about("기능 스펙 추가")
+                .arg(
+                    Arg::new(SLUG)
+                        .long(SLUG)
+                        .required(true)
+                        .value_parser(parse_slug),
+                )
+                .arg(Arg::new(TITLE).long(TITLE).required(true))
+                .arg(
+                    Arg::new(PATHS)
+                        .long(PATHS)
+                        .value_name("글롭")
+                        .action(ArgAction::Append),
+                )
+                .arg(
+                    Arg::new(TESTS)
+                        .long(TESTS)
+                        .value_name("글롭")
+                        .action(ArgAction::Append),
+                )
+                .arg(list_arg(DEPENDS_ON))
+                .arg(Arg::new(PARENT).long(PARENT)),
             clap::Command::new(SOURCE)
                 .about("소스 노트 추가")
                 .arg(Arg::new(FROM).long(FROM).value_name("JSON 파일"))
@@ -541,6 +583,10 @@ mod tests {
                         status: "accepted".to_string(),
                         confidence: "inferred".to_string(),
                         decisions: Vec::new(),
+                        paths: Vec::new(),
+                        tests: Vec::new(),
+                        depends_on: Vec::new(),
+                        parent: None,
                     })),
                 ),
                 Command::Uninstall => (
@@ -556,6 +602,7 @@ mod tests {
                         dry_run: false,
                         skills: true,
                         ci: true,
+                        init: false,
                     },
                 ),
                 Command::Init => (

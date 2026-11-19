@@ -80,8 +80,10 @@ impl EdgeKind {
     }
 }
 
-/// 엣지를 만든 근거. 2단계에서는 모두 머리말이다.
+/// 엣지를 만든 근거. 사람이 머리말에 선언한 연결이다.
 pub const ORIGIN_FRONTMATTER: &str = "frontmatter";
+/// 엣지를 만든 근거. 정적 분석이 코드에서 추론한 연결이다.
+pub const ORIGIN_ANALYSIS: &str = "analysis";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Node {
@@ -199,20 +201,7 @@ pub fn build(corpus: &Corpus, root: &Path, files: &[String]) -> Result<Graph, Ve
     }
 
     for file in &touched_files {
-        let hash = std::fs::read(root.join(file))
-            .map(|bytes| sha256_hex(&bytes))
-            .unwrap_or_default();
-        nodes.push(Node {
-            id: file.clone(),
-            kind: "file",
-            title: None,
-            summary: None,
-            status: None,
-            source_path: file.clone(),
-            content_hash: hash,
-            frontmatter: None,
-            body: None,
-        });
+        nodes.push(file_node(root, file));
     }
 
     if !problems.is_empty() {
@@ -241,6 +230,80 @@ fn document_node(doc: &Document) -> Node {
         content_hash: doc.hash.clone(),
         frontmatter: Some(doc.frontmatter.to_string()),
         body: Some(doc.body.clone()),
+    }
+}
+
+/// 정적 분석의 파일 노드와 파일 → 파일 의존함 엣지를 더한다.
+///
+/// 분석한 파일은 스펙에 속하지 않아도 모두 노드가 된다. 스펙 밖의 파일을 거친 의존이 끊기지 않게 하기 위해서다.
+pub fn add_analysis(graph: &mut Graph, root: &Path, analysis: &crate::analysis::Analysis) {
+    let known: BTreeSet<String> = graph
+        .nodes
+        .iter()
+        .filter(|node| node.kind == "file")
+        .map(|node| node.id.clone())
+        .collect();
+    for file in analysis.files.iter().filter(|file| !known.contains(*file)) {
+        graph.nodes.push(file_node(root, file));
+    }
+    graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    for (id, file) in &analysis.symbols {
+        // 파일 경로에도 `#`이 들어갈 수 있으니 파일 경로를 떼어 낸 나머지가 이름이다.
+        let name = id
+            .strip_prefix(file.as_str())
+            .and_then(|rest| rest.strip_prefix('#'))
+            .unwrap_or(id);
+        graph.nodes.push(Node {
+            id: id.clone(),
+            kind: "symbol",
+            title: Some(name.to_string()),
+            summary: None,
+            status: None,
+            source_path: file.clone(),
+            content_hash: String::new(),
+            frontmatter: None,
+            body: None,
+        });
+    }
+    graph.nodes.sort_by(|a, b| a.id.cmp(&b.id));
+    let edge = |src: &String, dst: &String, kind| Edge {
+        src: src.clone(),
+        dst: dst.clone(),
+        kind,
+        origin: ORIGIN_ANALYSIS,
+    };
+    graph.edges.extend(
+        analysis
+            .edges
+            .iter()
+            .chain(&analysis.symbol_edges)
+            .map(|(src, dst)| edge(src, dst, EdgeKind::DependsOn)),
+    );
+    // 심볼은 담은 파일에 속한다.
+    graph.edges.extend(
+        analysis
+            .symbols
+            .iter()
+            .map(|(id, file)| edge(id, file, EdgeKind::BelongsTo)),
+    );
+    graph.edges.sort();
+    graph.edges.dedup();
+}
+
+fn file_node(root: &Path, file: &str) -> Node {
+    let hash = std::fs::read(root.join(file))
+        .map(|bytes| sha256_hex(&bytes))
+        .unwrap_or_default();
+    Node {
+        id: file.to_string(),
+        kind: "file",
+        title: None,
+        summary: None,
+        status: None,
+        source_path: file.to_string(),
+        content_hash: hash,
+        frontmatter: None,
+        body: None,
     }
 }
 

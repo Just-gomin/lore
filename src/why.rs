@@ -317,6 +317,12 @@ pub fn render(report: &WhyReport) -> String {
     for record in &report.records {
         blocks.push(render_record(record));
     }
+    if blocks.is_empty() {
+        blocks.push(format!(
+            "{} 에 연결된 스펙이 없습니다. 이 파일을 맡을 스펙의 paths에 더하면 결정과 사고가 이어집니다.",
+            report.target.id
+        ));
+    }
     if report.depth == Depth::Index
         && let Some(next) = next_step(report)
     {

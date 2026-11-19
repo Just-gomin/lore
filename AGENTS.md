@@ -5,7 +5,7 @@
 ## 먼저 읽을 문서
 
 - [`docs/plan/plan.md`](docs/plan/plan.md): 기획서. 무엇을 왜 만드는지와 확정한 결정 서른네 가지가 있습니다. 설계에 관한 질문은 여기서 먼저 찾습니다.
-- [`docs/plan/stage-4.md`](docs/plan/stage-4.md): 지금 하고 있는 4단계의 작업 순서와 완료 기준입니다. 끝난 단계는 [`stage-2.md`](docs/plan/stage-2.md), [`stage-3.md`](docs/plan/stage-3.md)에 있습니다. 다음 단계는 [`stage-5.md`](docs/plan/stage-5.md)이며, 4단계의 경고 운영이 끝나기 전에 미리 썼습니다.
+- [`docs/plan/stage-4.md`](docs/plan/stage-4.md): 지금 하고 있는 4단계의 작업 순서와 완료 기준입니다. 끝난 단계는 [`stage-2.md`](docs/plan/stage-2.md), [`stage-3.md`](docs/plan/stage-3.md)에 있습니다. 그 뒤 단계는 [`stage-5.md`](docs/plan/stage-5.md)(구현을 마치고 업무 프로젝트 적용을 기다림), [`stage-6.md`](docs/plan/stage-6.md)이며, 앞 단계가 끝나기 전에 미리 썼습니다.
 
 기획서와 다르게 만들어야 할 이유가 생기면 코드만 바꾸지 말고, 사람에게 묻고 기획서 9장의 결정 기록을 같은 PR에서 고칩니다.
 
@@ -30,10 +30,13 @@
 | `src/source.rs`      | 소스 폴더를 훑어 종류별로 읽고 참조를 검사           |
 | `src/git.rs`         | 추적 파일 목록, 현재 커밋, 작업 트리 상태            |
 | `src/graph.rs`       | 소스와 파일로 노드와 엣지 계산                       |
+| `src/analysis.rs`    | 정적 분석: JS·TS의 import로 파일 → 파일 의존         |
+| `src/resolve.rs`     | 모듈 경로 해석: 상대 경로, tsconfig 별칭, pnpm 워크스페이스 |
+| `src/symbols.rs`     | 심볼: 내보낸 이름과 그 이름을 쓰는 선언을 이음       |
 | `src/db.rs`          | SQLite 스키마와 쓰기                                 |
 | `src/index.rs`       | `docs/INDEX.md` 본문 만들기                          |
 | `src/build.rs`       | `lore build`: 디비와 인덱스 만들기                   |
-| `src/add.rs`         | `lore add`: 결정과 사고 기록 만들기                  |
+| `src/add.rs`         | `lore add`: 결정, 사고 기록, 스펙 만들기             |
 | `src/add_source.rs`  | `lore add source`: 등급을 적용해 소스 노트 만들기    |
 | `src/install.rs`     | `lore install`, `lore uninstall`: 안내문, 뼈대, 스킬, 워크플로 |
 | `src/check.rs`       | `lore check`: 기계적 검사와 판단이 드는 검사         |
@@ -46,14 +49,15 @@
 | `connectors/common/` | 커넥터가 함께 쓰는 출력 형식, 소스 노트 읽기, GitHub 주소 해석 |
 | `connectors/git/`    | `lore-connector-git`: git 이력에서 소스 노트 후보 뽑기 |
 | `connectors/github/` | `lore-connector-github`: GitHub PR과 이슈에서 후보 뽑기, 최신 판 목록 |
-| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬, 워크플로 |
+| `templates/`         | 바이너리에 넣는 템플릿, 안내문, 기본 설정, 스킬(`lore init` 스킬 포함), 워크플로 |
 | `.github/workflows/` | 이 레포의 CI(`ci.yaml`)와 태그를 올리면 바이너리를 올리는 릴리스(`release.yaml`) |
 | `tests/cli.rs`       | 바이너리를 실행해 출력 계약을 확인하는 테스트        |
 | `tests/sources.rs`   | 고정 예제로 소스 읽기를 확인하는 테스트              |
 | `tests/build.rs`     | 고정 예제로 `lore build`를 확인하는 테스트           |
+| `tests/analysis.rs`  | 분석용 고정 예제로 정적 분석을 확인하는 테스트       |
 | `tests/index.rs`     | 고정 예제로 `docs/INDEX.md` 생성을 확인하는 테스트   |
 | `tests/why.rs`       | 고정 예제로 `lore why` 조회를 확인하는 테스트        |
-| `tests/add.rs`       | 고정 예제로 `lore add`를 확인하는 테스트             |
+| `tests/add.rs`       | 고정 예제로 `lore add`(결정, 사고, 스펙)를 확인하는 테스트 |
 | `tests/add_source.rs` | 고정 예제로 `lore add source`를 확인하는 테스트     |
 | `tests/install.rs`   | 빈 레포와 기존 파일로 `lore install`을 확인하는 테스트 |
 | `tests/uninstall.rs` | 설치한 것만 걷어내는지 확인하는 테스트               |
@@ -63,7 +67,7 @@
 | `tests/init.rs`      | 고정 예제로 `lore init`을 확인하는 테스트            |
 | `tests/impact.rs`    | 고정 예제로 `lore impact`를 확인하는 테스트          |
 | `tests/common/`      | 고정 예제를 임시 git 레포로 만드는 도우미            |
-| `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력 |
+| `tests/fixtures/`    | 고정 예제. `payment`는 정상, `invalid`는 잘못된 입력, `analysis`는 정적 분석용 |
 
 ## 작업 방법
 
