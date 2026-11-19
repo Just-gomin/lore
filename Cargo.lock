@@ -441,6 +441,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lore-connector-git"
+version = "0.1.1"
+dependencies = [
+ "clap",
+ "globset",
+ "lore-connector-common",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
