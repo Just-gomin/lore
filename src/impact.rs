@@ -2,8 +2,11 @@
 //!
 //! 홉은 기능 사이를 건너는 횟수다. 대상에서 출발해 의존함, 속함 엣지를 거꾸로 건너
 //! "대상에 기대는 기능"을 찾고, 닿은 기능마다 파일, 테스트, 유효한 결정, 사고를 모은다.
+//!
+//! 정적 분석이 만든 의존(추론)도 기능 하나를 건너는 길로 센다. 파일 X를 기능 B의 파일이
+//! 스펙에 속하지 않은 파일을 몇 번 거치든 import하면, B는 X가 속한 기능에서 한 홉이다.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::Path;
 
 use rusqlite::Connection;
@@ -12,7 +15,7 @@ use serde::Serialize;
 use crate::config::Config;
 use crate::db::database_error;
 use crate::error::LoreError;
-use crate::graph::{EdgeKind, ORIGIN_FRONTMATTER};
+use crate::graph::{EdgeKind, ORIGIN_ANALYSIS, ORIGIN_FRONTMATTER};
 use crate::query;
 
 /// 기능 사이에서 건널 수 있는 엣지. `--edges`의 기본값이기도 하다.
@@ -48,8 +51,13 @@ pub struct Item {
     pub title: Option<String>,
     /// 기능 사이를 건넌 횟수. 0은 대상이 직접 닿는 기능이다.
     pub hop: u32,
+    /// 길의 근거. 정적 분석의 의존을 한 번이라도 건넜으면 `inferred`, 아니면 `declared`다.
+    pub evidence: &'static str,
     /// 대상에서 이 노드까지 건넌 엣지. 엣지는 디비에 적힌 방향 그대로다.
     pub path: Vec<Step>,
+    /// 길의 앞에서 대상이 직접 닿는 기능까지 온 엣지 수. 사람용 출력이 건너뛴다.
+    #[serde(skip)]
+    lead: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -62,6 +70,20 @@ pub struct Step {
 }
 
 impl Item {
+    fn new(id: String, hop: u32, path: Vec<Step>, lead: usize) -> Item {
+        let inferred = path
+            .iter()
+            .any(|step| step.kind == EdgeKind::DependsOn && step.origin != ORIGIN_FRONTMATTER);
+        Item {
+            id,
+            title: None,
+            hop,
+            evidence: if inferred { "inferred" } else { "declared" },
+            path,
+            lead,
+        }
+    }
+
     /// 더 짧은 길이 앞선다. 길이가 같으면 경로를 글자 순으로 비교해 결과를 하나로 정한다.
     fn key(&self) -> (u32, usize, &Vec<Step>) {
         (self.hop, self.path.len(), &self.path)
@@ -85,46 +107,110 @@ pub fn impact(
     hop: u32,
     edges: &[EdgeKind],
 ) -> Result<ImpactReport, LoreError> {
-    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input)?;
+    let (conn, rebuilt, id, kind) = query::open_target(config, cwd, input, true)?;
     let mut edges = edges.to_vec();
     edges.sort();
     edges.dedup();
+    // 분석 엣지는 모두 의존함이라 `--edges`에서 의존함을 빼면 함께 빠진다.
+    let analysis = edges.contains(&EdgeKind::DependsOn);
 
-    let mut features = BTreeMap::new();
-    for seed in seeds(&conn, &id, &kind)? {
-        for item in reach(&conn, &seed, hop, &edges)? {
-            keep_shortest(&mut features, item);
+    let seeds = seeds(&conn, &id, &kind)?;
+    let seed_ids: BTreeSet<String> = seeds.iter().map(|item| item.id.clone()).collect();
+    let mut features: BTreeMap<(String, &'static str), Item> = BTreeMap::new();
+    let mut files = BTreeMap::new();
+
+    // 홉 0의 펼칠 거리. 파일과 심볼은 분석 엣지를 대상 자신에서 출발한다.
+    let mut frontier = Vec::new();
+    let from_target = matches!(kind.as_str(), "file" | "symbol");
+    for seed in &seeds {
+        let lead = seed.path.len();
+        let seed = Item::new(seed.id.clone(), 0, seed.path.clone(), lead);
+        keep_shortest_feature(&mut features, seed.clone());
+        let sources = if from_target {
+            Vec::new()
+        } else {
+            feature_files(&conn, &seed)?
+        };
+        frontier.push(Expansion {
+            feature: Some(seed),
+            sources,
+        });
+    }
+    if from_target {
+        frontier.push(Expansion {
+            feature: None,
+            sources: vec![(id.clone(), Vec::new())],
+        });
+    }
+
+    for level in 0..hop {
+        let mut reached: BTreeMap<(String, &'static str), Item> = BTreeMap::new();
+        for expansion in &frontier {
+            if let Some(feature) = &expansion.feature {
+                for step in declared(&conn, &feature.id, &edges)? {
+                    let mut path = feature.path.clone();
+                    let src = step.src.clone();
+                    path.push(step);
+                    keep_shortest_feature(
+                        &mut reached,
+                        Item::new(src, level + 1, path, feature.lead),
+                    );
+                }
+            }
+            if analysis && !expansion.sources.is_empty() {
+                let lead = expansion.feature.as_ref().map_or(0, |feature| feature.lead);
+                let walked = walk(&conn, &expansion.sources, &seed_ids)?;
+                for (feature, path) in walked.features {
+                    keep_shortest_feature(&mut reached, Item::new(feature, level + 1, path, lead));
+                }
+                for (file, path, owned) in walked.files {
+                    let hop = if owned { level + 1 } else { level };
+                    keep_shortest(&mut files, Item::new(file, hop, path, lead));
+                }
+            }
+        }
+        frontier = Vec::new();
+        for (key, item) in reached {
+            // 대상이 직접 닿는 기능에는 다른 길로 돌아오지 않는다.
+            if features.contains_key(&key) || seed_ids.contains(&key.0) {
+                continue;
+            }
+            features.insert(key, item.clone());
+            let sources = feature_files(&conn, &item)?;
+            frontier.push(Expansion {
+                feature: Some(item),
+                sources,
+            });
         }
     }
 
-    let attach = |edge: EdgeKind| -> Result<Vec<Item>, LoreError> {
-        let mut found = BTreeMap::new();
+    let attach = |edge: EdgeKind, found: &mut BTreeMap<String, Item>| -> Result<(), LoreError> {
         for feature in features.values() {
             for step in incoming(&conn, &feature.id, edge)? {
                 let mut path = feature.path.clone();
                 let src = step.src.clone();
                 path.push(step);
-                keep_shortest(
-                    &mut found,
-                    Item {
-                        id: src,
-                        title: None,
-                        hop: feature.hop,
-                        path,
-                    },
-                );
+                keep_shortest(found, Item::new(src, feature.hop, path, feature.lead));
             }
         }
+        Ok(())
+    };
+    // 영향받는 파일에는 분석 엣지로 대상에 닿은 파일도 들어 있다.
+    attach(EdgeKind::Implements, &mut files)?;
+    let files = sorted(files);
+    let collect = |edge: EdgeKind| -> Result<Vec<Item>, LoreError> {
+        let mut found = BTreeMap::new();
+        attach(edge, &mut found)?;
         Ok(sorted(found))
     };
-    let files = attach(EdgeKind::Implements)?;
-    let tests = attach(EdgeKind::Verifies)?;
-    let mut decisions = attach(EdgeKind::Decides)?;
+    let tests = collect(EdgeKind::Verifies)?;
+    let mut decisions = collect(EdgeKind::Decides)?;
     let superseded = superseded(&conn)?;
     decisions.retain(|item| !superseded.contains(&item.id));
-    let mut incidents = attach(EdgeKind::OccurredIn)?;
+    let mut incidents = collect(EdgeKind::OccurredIn)?;
 
-    let mut features = sorted(features);
+    let mut features: Vec<Item> = features.into_values().collect();
+    features.sort_by(|a, b| (a.hop, &a.id, a.evidence).cmp(&(b.hop, &b.id, b.evidence)));
     for item in features
         .iter_mut()
         .chain(&mut decisions)
@@ -203,12 +289,8 @@ fn outgoing(conn: &Connection, src: &str, kinds: &[EdgeKind]) -> Result<Vec<Step
 fn seeds(conn: &Connection, id: &str, kind: &str) -> Result<Vec<Item>, LoreError> {
     let item = |path: Vec<Step>| {
         let id = path.last().map(|step| step.dst.clone()).unwrap_or_default();
-        Item {
-            id,
-            title: None,
-            hop: 0,
-            path,
-        }
+        let lead = path.len();
+        Item::new(id, 0, path, lead)
     };
     let direct = |kinds: &[EdgeKind]| -> Result<Vec<Item>, LoreError> {
         Ok(outgoing(conn, id, kinds)?
@@ -217,13 +299,22 @@ fn seeds(conn: &Connection, id: &str, kind: &str) -> Result<Vec<Item>, LoreError
             .collect())
     };
     match kind {
-        "feature" => Ok(vec![Item {
-            id: id.to_string(),
-            title: None,
-            hop: 0,
-            path: Vec::new(),
-        }]),
+        "feature" => Ok(vec![Item::new(id.to_string(), 0, Vec::new(), 0)]),
         "file" => direct(&[EdgeKind::Implements, EdgeKind::Verifies]),
+        // 심볼은 담은 파일을 거쳐 기능에 닿는다.
+        "symbol" => {
+            let mut items = Vec::new();
+            for belongs in outgoing(conn, id, &[EdgeKind::BelongsTo])? {
+                for next in outgoing(
+                    conn,
+                    &belongs.dst,
+                    &[EdgeKind::Implements, EdgeKind::Verifies],
+                )? {
+                    items.push(item(vec![belongs.clone(), next]));
+                }
+            }
+            Ok(items)
+        }
         "decision" => direct(&[EdgeKind::Decides]),
         "incident" => direct(&[EdgeKind::OccurredIn]),
         // 소스 노트는 근거가 되는 결정과 사고를 거쳐 기능에 닿는다.
@@ -243,83 +334,133 @@ fn seeds(conn: &Connection, id: &str, kind: &str) -> Result<Vec<Item>, LoreError
     }
 }
 
-/// `seed`에서 엣지를 거꾸로 `hop`번까지 건너 닿는 기능. 재귀 쿼리로 찾는다.
-///
-/// 경로는 `src`, `dst`, `kind`, `origin`을 구분 문자로 이어 붙인 글자로 들고 다니다가 마지막에 푼다.
-/// 이미 지난 기능은 다시 건너지 않아 순환이 있어도 끝난다.
-fn reach(
-    conn: &Connection,
-    seed: &Item,
-    hop: u32,
-    edges: &[EdgeKind],
-) -> Result<Vec<Item>, LoreError> {
-    if edges.is_empty() {
-        return Ok(vec![seed.clone()]);
-    }
-    let kinds = edges
-        .iter()
-        .map(|kind| format!("'{}'", kind.name()))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let sql = format!(
-        "WITH RECURSIVE reach(id, hop, path, seen) AS (
-             SELECT ?1, 0, '', char(29) || ?1 || char(29)
-             UNION ALL
-             SELECT e.src, r.hop + 1,
-                    r.path || e.src || char(31) || e.dst || char(31) || e.kind || char(31) || e.origin || char(30),
-                    r.seen || e.src || char(29)
-             FROM reach r JOIN edges e ON e.dst = r.id
-             WHERE r.hop < ?2 AND e.kind IN ({kinds})
-               AND instr(r.seen, char(29) || e.src || char(29)) = 0
-         )
-         SELECT id, hop, path FROM reach ORDER BY hop, id, path"
-    );
-    let mut stmt = conn.prepare_cached(&sql).map_err(database_error)?;
-    let rows = stmt
-        .query_map(rusqlite::params![seed.id, hop], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, u32>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })
-        .map_err(database_error)?;
-
-    let mut found = BTreeMap::new();
-    for row in rows {
-        let (id, hop, encoded) = row.map_err(database_error)?;
-        let mut path = seed.path.clone();
-        path.extend(decode(&encoded));
-        keep_shortest(
-            &mut found,
-            Item {
-                id,
-                title: None,
-                hop,
-                path,
-            },
-        );
-    }
-    Ok(found.into_values().collect())
+/// 한 기능(또는 대상)에서 다음 홉으로 펼칠 거리.
+struct Expansion {
+    /// 선언 엣지를 따라갈 기능. 스펙에 속하지 않은 파일이 대상이면 없다.
+    feature: Option<Item>,
+    /// 분석 엣지를 거꾸로 따라갈 출발 노드와 거기까지 온 길.
+    sources: Vec<(String, Vec<Step>)>,
 }
 
-fn decode(encoded: &str) -> Vec<Step> {
-    encoded
-        .split('\u{1e}')
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| {
-            let fields: Vec<&str> = part.split('\u{1f}').collect();
-            let [src, dst, kind, origin] = fields.as_slice() else {
-                return None;
+/// 같은 기능이라도 근거가 다르면 따로 남긴다. 근거마다 가장 짧은 길 하나다.
+fn keep_shortest_feature(found: &mut BTreeMap<(String, &'static str), Item>, item: Item) {
+    let key = (item.id.clone(), item.evidence);
+    match found.get(&key) {
+        Some(old) if old.key() <= item.key() => {}
+        _ => {
+            found.insert(key, item);
+        }
+    }
+}
+
+/// `feature`로 선언 엣지를 거꾸로 건너 한 홉에 닿는 기능.
+fn declared(conn: &Connection, feature: &str, edges: &[EdgeKind]) -> Result<Vec<Step>, LoreError> {
+    let mut steps = Vec::new();
+    for kind in edges {
+        steps.extend(
+            incoming(conn, feature, *kind)?
+                .into_iter()
+                .filter(|step| step.origin == ORIGIN_FRONTMATTER && step.src != feature),
+        );
+    }
+    Ok(steps)
+}
+
+/// 기능의 파일들. 분석 엣지를 따라갈 출발점이 된다.
+fn feature_files(conn: &Connection, feature: &Item) -> Result<Vec<(String, Vec<Step>)>, LoreError> {
+    let mut sources = Vec::new();
+    for kind in [EdgeKind::Implements, EdgeKind::Verifies] {
+        for step in incoming(conn, &feature.id, kind)? {
+            let mut path = feature.path.clone();
+            let src = step.src.clone();
+            path.push(step);
+            sources.push((src, path));
+        }
+    }
+    Ok(sources)
+}
+
+/// 분석 엣지로 닿은 것들.
+struct Walked {
+    /// 닿은 기능과 길. 길의 끝은 그 기능의 파일이 기능을 구현하거나 검증하는 엣지다.
+    features: Vec<(String, Vec<Step>)>,
+    /// 닿은 파일, 길, 스펙에 속했는지.
+    files: Vec<(String, Vec<Step>, bool)>,
+}
+
+/// 출발 노드들에 의존하는 파일과 심볼을 분석 엣지로 거꾸로 따라간다.
+///
+/// 스펙에 속한 파일에 닿으면 그 기능을 내고 거기서 멈춘다. 스펙에 속하지 않은 파일과 심볼은 계속 건넌다.
+/// 파일에서는 그 파일의 심볼에 의존하는 것도 따라간다. 심볼 의존은 re-export를 거쳐 정의에 닿아 있어서,
+/// 폴더의 `index.ts`를 거쳐 가져간 파일도 찾는다.
+/// `skip`의 기능(대상이 직접 닿는 기능)은 내지 않는다. 같은 노드는 한 번만 지나 순환이 있어도 끝난다.
+fn walk(
+    conn: &Connection,
+    sources: &[(String, Vec<Step>)],
+    skip: &BTreeSet<String>,
+) -> Result<Walked, LoreError> {
+    let mut walked = Walked {
+        features: Vec::new(),
+        files: Vec::new(),
+    };
+    let mut seen: BTreeSet<String> = sources.iter().map(|(id, _)| id.clone()).collect();
+    let mut queue: VecDeque<(String, Vec<Step>)> = sources.iter().cloned().collect();
+    while let Some((node, path)) = queue.pop_front() {
+        for belongs in incoming(conn, &node, EdgeKind::BelongsTo)?
+            .into_iter()
+            .filter(|step| step.origin == ORIGIN_ANALYSIS)
+        {
+            if seen.insert(belongs.src.clone()) {
+                let mut path = path.clone();
+                let symbol = belongs.src.clone();
+                path.push(belongs);
+                queue.push_back((symbol, path));
+            }
+        }
+        let steps = incoming(conn, &node, EdgeKind::DependsOn)?;
+        for step in steps
+            .into_iter()
+            .filter(|step| step.origin == ORIGIN_ANALYSIS)
+        {
+            if !seen.insert(step.src.clone()) {
+                continue;
+            }
+            let src = step.src.clone();
+            let mut path = path.clone();
+            path.push(step);
+            // 심볼은 담은 파일로 기능을 찾는다.
+            let mut to_file = path.clone();
+            let file = match outgoing(conn, &src, &[EdgeKind::BelongsTo])?
+                .into_iter()
+                .find(|step| step.origin == ORIGIN_ANALYSIS)
+            {
+                Some(belongs) => {
+                    let file = belongs.dst.clone();
+                    to_file.push(belongs);
+                    file
+                }
+                None => src.clone(),
             };
-            Some(Step {
-                src: src.to_string(),
-                dst: dst.to_string(),
-                kind: EdgeKind::from_name(kind)?,
-                origin: origin.to_string(),
-            })
-        })
-        .collect()
+            let owners = outgoing(conn, &file, &[EdgeKind::Implements, EdgeKind::Verifies])?;
+            walked
+                .files
+                .push((file, to_file.clone(), !owners.is_empty()));
+            if owners.is_empty() {
+                queue.push_back((src, path));
+                continue;
+            }
+            for owner in owners {
+                if skip.contains(&owner.dst) {
+                    continue;
+                }
+                let mut path = to_file.clone();
+                let feature = owner.dst.clone();
+                path.push(owner);
+                walked.features.push((feature, path));
+            }
+        }
+    }
+    Ok(walked)
 }
 
 /// 다른 결정이 대체한 결정의 ID.
@@ -354,7 +495,12 @@ pub fn render(report: &ImpactReport) -> String {
         let route = if item.hop == 0 {
             "직접".to_string()
         } else {
-            format!("{}홉  {}", item.hop, describe(&feature_steps(item)))
+            format!(
+                "{}홉  {}  {}",
+                item.hop,
+                evidence_label(item.evidence),
+                describe(&item.path[item.lead..])
+            )
         };
         text.push_str(&format!("\n  {:width$}  {route}", item.id));
     }
@@ -368,32 +514,41 @@ pub fn render(report: &ImpactReport) -> String {
         text.push_str(&format!("\n\n{label}  {}개", items.len()));
         let width = id_width(items);
         for item in items {
-            let feature = item
-                .path
-                .last()
-                .map(|step| step.dst.as_str())
-                .unwrap_or_default();
             let mut line = format!("\n  {:width$}  ", item.id);
             if let Some(title) = &item.title {
                 line.push_str(&format!("{title}  "));
             }
-            line.push_str(&format!("({feature})"));
+            // 분석 엣지로 닿은 파일은 무엇에 의존하는지, 나머지는 어느 기능에 닿았는지 보인다.
+            // 심볼로 닿았으면 그 파일의 심볼이 의존한 것을 보인다.
+            let reached_by = item.path.iter().rev().find(|step| {
+                step.kind == EdgeKind::DependsOn
+                    && (step.src == item.id
+                        || step
+                            .src
+                            .strip_prefix(item.id.as_str())
+                            .is_some_and(|rest| rest.starts_with('#')))
+            });
+            match reached_by {
+                Some(step) => {
+                    line.push_str(&format!("({} {})", step.kind.label(), step.dst));
+                }
+                _ => {
+                    let feature = item
+                        .path
+                        .last()
+                        .map(|step| step.dst.as_str())
+                        .unwrap_or_default();
+                    line.push_str(&format!("({feature})"));
+                }
+            }
             text.push_str(&line);
         }
     }
     text
 }
 
-/// 기능 사이를 건넌 엣지만. 대상에서 첫 기능까지 온 엣지는 빼고 보여 준다.
-fn feature_steps(item: &Item) -> Vec<&Step> {
-    item.path
-        .iter()
-        .filter(|step| TRAVERSABLE.contains(&step.kind))
-        .collect()
-}
-
 /// `note 의존함 common (선언)`처럼 엣지를 사람이 읽는 말로 잇는다.
-fn describe(steps: &[&Step]) -> String {
+fn describe(steps: &[Step]) -> String {
     steps
         .iter()
         .map(|step| {
@@ -407,6 +562,14 @@ fn describe(steps: &[&Step]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+fn evidence_label(evidence: &str) -> &str {
+    if evidence == "declared" {
+        "선언"
+    } else {
+        "추론"
+    }
 }
 
 fn origin_label(origin: &str) -> &str {
@@ -423,30 +586,11 @@ fn kind_label(kind: &str) -> &str {
         "file" => "파일",
         "decision" => "결정",
         "incident" => "사고",
+        "symbol" => "심볼",
         _ => "소스 노트",
     }
 }
 
 fn id_width(items: &[Item]) -> usize {
     items.iter().map(|item| item.id.len()).max().unwrap_or(0)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn 이어_붙인_경로를_엣지로_푼다() {
-        let encoded = "note\u{1f}common\u{1f}depends_on\u{1f}frontmatter\u{1e}";
-        assert_eq!(
-            decode(encoded),
-            [Step {
-                src: "note".to_string(),
-                dst: "common".to_string(),
-                kind: EdgeKind::DependsOn,
-                origin: "frontmatter".to_string(),
-            }]
-        );
-        assert_eq!(decode(""), []);
-    }
 }
