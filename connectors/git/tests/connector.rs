@@ -214,3 +214,103 @@ fn 채널이_없거나_git_레포가_아니면_json_오류다() {
     assert_eq!(code, Some(1));
     assert_eq!(report["error"]["code"], "git");
 }
+
+#[test]
+fn 병합_커밋은_첫_부모와_견준_파일만_본다() {
+    let dir = repo();
+    let date = "2026-11-11T09:00:00+00:00";
+    git(
+        dir.path(),
+        date,
+        &["checkout", "-q", "-b", "feat", "HEAD~1"],
+    );
+    commit(dir.path(), date, "features/feat.ts", "feat: 기능");
+    git(dir.path(), date, &["checkout", "-q", "main"]);
+    git(
+        dir.path(),
+        date,
+        &[
+            "merge",
+            "-q",
+            "--no-ff",
+            "-m",
+            "Merge branch 'feat'",
+            "feat",
+        ],
+    );
+    let (_, report) = run(dir.path(), &["--channel", "git", "--limit", "1"]);
+    let merge = &report["candidates"][0];
+    assert_eq!(merge["title"], "Merge branch 'feat'");
+    assert!(
+        merge["text"]
+            .as_str()
+            .unwrap()
+            .ends_with("바뀐 파일:\n- features/feat.ts"),
+        "{merge}"
+    );
+    // main에만 있던 파일로 거르면 병합 커밋은 나오지 않는다.
+    let (_, report) = run(
+        dir.path(),
+        &["--channel", "git", "--paths", "services/payment/policy.ts"],
+    );
+    assert_eq!(titles(&report), ["feat: 재시도 횟수를 5회로 (#12)"]);
+}
+
+#[test]
+fn 한글_경로와_중괄호_글롭을_그대로_읽는다() {
+    let dir = repo();
+    commit(
+        dir.path(),
+        "2026-11-12T09:00:00+00:00",
+        "문서/결정.md",
+        "docs: 결정 문서",
+    );
+    let (_, report) = run(dir.path(), &["--channel", "git", "--paths", "문서/**"]);
+    assert_eq!(titles(&report), ["docs: 결정 문서"]);
+    assert!(
+        report["candidates"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("- 문서/결정.md")
+    );
+    let (_, report) = run(
+        dir.path(),
+        &["--channel", "git", "--paths", "{문서,services}/**"],
+    );
+    assert_eq!(titles(&report).len(), 3);
+}
+
+#[test]
+fn since는_그날_자정부터이고_시각이_엇갈린_커밋_뒤도_본다() {
+    let dir = TempDir::new().unwrap();
+    git(dir.path(), "2026-11-01T00:00:00+00:00", &["init", "-q"]);
+    commit(dir.path(), "2026-11-03T00:30:00+00:00", "a.ts", "새벽 커밋");
+    // 시계가 어긋나 기준보다 이른 날짜가 찍힌 커밋
+    commit(
+        dir.path(),
+        "2026-11-01T12:00:00+00:00",
+        "b.ts",
+        "어긋난 커밋",
+    );
+    commit(dir.path(), "2026-11-04T12:00:00+00:00", "c.ts", "나중 커밋");
+    let (_, report) = run(dir.path(), &["--channel", "git", "--since", "2026-11-03"]);
+    assert_eq!(titles(&report), ["나중 커밋", "새벽 커밋"]);
+
+    let (code, report) = run(dir.path(), &["--channel", "git", "--since", "2026-13-45"]);
+    assert_eq!(code, Some(2));
+    assert_eq!(report["error"]["code"], "usage");
+}
+
+#[test]
+fn 커밋이_없는_레포는_빈_목록이고_없는_원격을_고르면_오류다() {
+    let empty = TempDir::new().unwrap();
+    git(empty.path(), "2026-11-01T00:00:00+00:00", &["init", "-q"]);
+    let (code, report) = run(empty.path(), &["--channel", "git"]);
+    assert_eq!(code, Some(0));
+    assert_eq!(report["candidates"], serde_json::json!([]));
+
+    let dir = repo();
+    let (code, report) = run(dir.path(), &["--channel", "git", "--remote", "upstream"]);
+    assert_eq!(code, Some(2));
+    assert_eq!(report["error"]["code"], "usage");
+}

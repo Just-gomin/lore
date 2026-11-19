@@ -30,8 +30,8 @@ fn main() -> ExitCode {
         .arg(
             Arg::new(PATHS)
                 .long(PATHS)
-                .value_name("글롭,...")
-                .value_delimiter(','),
+                .value_name("글롭")
+                .action(ArgAction::Append),
         )
         .arg(
             Arg::new(LIMIT)
@@ -79,6 +79,8 @@ fn main() -> ExitCode {
                     .get_one::<String>(REMOTE)
                     .cloned()
                     .unwrap_or_default(),
+                remote_given: matches.value_source(REMOTE)
+                    == Some(clap::parser::ValueSource::CommandLine),
                 exclude_pr_commits: matches.get_flag(EXCLUDE_PR_COMMITS),
             };
             candidates(&options).map(|list| candidates_json(&list))
@@ -89,7 +91,7 @@ fn main() -> ExitCode {
             println!("{json}");
             ExitCode::SUCCESS
         }
-        Err(error) => fail(&error, 1),
+        Err(error) => fail(&error, if error.code == "usage" { 2 } else { 1 }),
     }
 }
 
@@ -104,13 +106,25 @@ struct Options {
     paths: Vec<String>,
     limit: Option<usize>,
     remote: String,
+    /// `--remote`를 직접 줬는지. 기본 원격은 없어도 되지만, 고른 원격이 없으면 오류입니다.
+    remote_given: bool,
     exclude_pr_commits: bool,
 }
 
+/// 사용자 설정이 출력 모양을 바꾸지 않게 고정해 git을 부릅니다.
 fn git(args: &[&str]) -> Result<String, ConnectorError> {
-    let output = Command::new("git").args(args).output().map_err(|error| {
-        ConnectorError::new("git", format!("git을 실행하지 못했습니다: {error}"))
-    })?;
+    let output = Command::new("git")
+        .args([
+            "-c",
+            "core.quotepath=false",
+            "-c",
+            "log.showSignature=false",
+        ])
+        .args(args)
+        .output()
+        .map_err(|error| {
+            ConnectorError::new("git", format!("git을 실행하지 못했습니다: {error}"))
+        })?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     } else {
@@ -122,27 +136,42 @@ fn git(args: &[&str]) -> Result<String, ConnectorError> {
 }
 
 /// 첫 부모를 따라간 커밋을 최신순으로 후보로 만듭니다.
+///
+/// `git log` 한 번으로 이력을 읽습니다. 병합 커밋은 첫 부모와 견준 파일만 봅니다.
 fn candidates(options: &Options) -> Result<Vec<Candidate>, ConnectorError> {
     let globs = options
         .paths
         .iter()
         .map(|pattern| matcher(pattern))
         .collect::<Result<Vec<_>, _>>()?;
-    let web = remote_web_url(&options.remote);
+    let since = options.since.as_deref().map(since_timestamp).transpose()?;
+    let web = remote_web_url(&options.remote, options.remote_given)?;
 
-    let mut args = vec!["rev-list", "--first-parent"];
-    let since;
-    if let Some(date) = &options.since {
-        since = format!("--since={date}");
-        args.push(&since);
+    git(&["rev-parse", "--git-dir"])?;
+    // 커밋이 하나도 없는 레포는 후보가 없습니다.
+    if git(&["rev-parse", "--verify", "--quiet", "HEAD"]).is_err() {
+        return Ok(Vec::new());
     }
-    args.push("HEAD");
+    let log = git(&[
+        "log",
+        "--first-parent",
+        "--diff-merges=first-parent",
+        "--name-only",
+        "-z",
+        "--date=format-local:%Y-%m-%d",
+        "--format=%x1e%H%x1f%ct%x1f%cd%x1f%s%x1f%B%x1f",
+        "HEAD",
+    ])?;
+
     let mut candidates = Vec::new();
-    for sha in git(&args)?.lines() {
+    for commit in log.split('\x1e').filter_map(parse_commit) {
         if options.limit.is_some_and(|limit| candidates.len() >= limit) {
             break;
         }
-        let commit = read_commit(sha)?;
+        // 커미터 시각이 앞뒤로 엇갈려도 이력을 끝까지 보도록 git에 맡기지 않고 여기서 거릅니다.
+        if since.is_some_and(|since| commit.timestamp < since) {
+            continue;
+        }
         if options.exclude_pr_commits && is_pr_commit(&commit.subject) {
             continue;
         }
@@ -161,66 +190,100 @@ fn candidates(options: &Options) -> Result<Vec<Candidate>, ConnectorError> {
                 text.push_str(&format!("\n- {file}"));
             }
         }
+        let title = if commit.subject.is_empty() {
+            format!("커밋 {}", &commit.sha[..commit.sha.len().min(12)])
+        } else {
+            commit.subject
+        };
         candidates.push(Candidate {
-            title: commit.subject,
+            title,
             kind: "evidence".to_string(),
             channel: options.channel.clone(),
             origin: match &web {
-                Some(base) => format!("{base}/commit/{sha}"),
-                None => format!("git:{sha}"),
+                Some(base) => format!("{base}/commit/{}", commit.sha),
+                None => format!("git:{}", commit.sha),
             },
-            origin_version: sha.to_string(),
+            origin_version: commit.sha,
             occurred_at: commit.date,
-            text,
+            text: text.trim_start().to_string(),
         });
     }
     Ok(candidates)
 }
 
 struct Commit {
-    subject: String,
-    message: String,
+    sha: String,
+    /// 커미터 시각(유닉스 초)
+    timestamp: i64,
     /// 커미터 날짜. 실행 환경의 로컬 시간대로 본 `YYYY-MM-DD`
     date: String,
+    subject: String,
+    message: String,
     files: Vec<String>,
 }
 
-fn read_commit(sha: &str) -> Result<Commit, ConnectorError> {
-    let header = git(&[
-        "show",
-        "-s",
-        "--date=format-local:%Y-%m-%d",
-        "--format=%cd%x00%s%x00%B",
+/// `git log` 출력의 커밋 하나. 칸은 0x1f로, 바뀐 파일은 NUL로 나뉩니다.
+fn parse_commit(record: &str) -> Option<Commit> {
+    let mut fields = record.splitn(6, '\x1f');
+    let sha = fields.next()?.trim().to_string();
+    if sha.is_empty() {
+        return None;
+    }
+    let timestamp = fields.next()?.trim().parse().ok()?;
+    let date = fields.next()?.to_string();
+    let subject = fields.next()?.to_string();
+    let message = fields.next()?.to_string();
+    let mut files: Vec<String> = fields
+        .next()
+        .unwrap_or_default()
+        .split('\0')
+        .map(|file| file.trim_start_matches('\n'))
+        .filter(|file| !file.is_empty())
+        .map(str::to_string)
+        .collect();
+    files.dedup();
+    Some(Commit {
         sha,
-    ])?;
-    let mut parts = header.splitn(3, '\0');
-    let date = parts.next().unwrap_or_default().to_string();
-    let subject = parts.next().unwrap_or_default().to_string();
-    let message = parts.next().unwrap_or_default().to_string();
-    // 첫 커밋은 --root로, 병합 커밋은 첫 부모와 견줘 바뀐 파일을 구합니다.
-    let files = git(&[
-        "diff-tree",
-        "--no-commit-id",
-        "-r",
-        "--root",
-        "-m",
-        "--first-parent",
-        "--name-only",
-        sha,
-    ])?
-    .lines()
-    .map(str::to_string)
-    .collect();
-    Ok(Commit {
+        timestamp,
+        date,
         subject,
         message,
-        date,
         files,
     })
 }
 
-/// 제목이 `(#123)`으로 끝나는 커밋. squash merge한 PR 커밋입니다.
+/// `YYYY-MM-DD`의 로컬 자정. git이 실행 환경의 시간대로 계산합니다.
+fn since_timestamp(date: &str) -> Result<i64, ConnectorError> {
+    let invalid = || {
+        ConnectorError::new(
+            "usage",
+            format!("--since '{date}'는 YYYY-MM-DD 날짜가 아닙니다."),
+        )
+    };
+    let parts: Vec<&str> = date.split('-').collect();
+    let valid = parts.len() == 3
+        && [4, 2, 2]
+            .iter()
+            .zip(&parts)
+            .all(|(len, part)| part.len() == *len && part.chars().all(|ch| ch.is_ascii_digit()));
+    let month: u32 = parts.get(1).and_then(|m| m.parse().ok()).unwrap_or(0);
+    let day: u32 = parts.get(2).and_then(|d| d.parse().ok()).unwrap_or(0);
+    if !valid || !(1..=12).contains(&month) || !(1..=31).contains(&day) {
+        return Err(invalid());
+    }
+    let output = git(&["rev-parse", &format!("--since={date} 00:00:00")])?;
+    output
+        .trim()
+        .strip_prefix("--max-age=")
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(invalid)
+}
+
+/// 제목이 `(#123)`으로 끝나는 squash 커밋과 `Merge pull request #123`으로 시작하는 병합 커밋.
 fn is_pr_commit(subject: &str) -> bool {
+    if let Some(rest) = subject.strip_prefix("Merge pull request #") {
+        return rest.chars().next().is_some_and(|ch| ch.is_ascii_digit());
+    }
     let Some(rest) = subject.trim_end().strip_suffix(')') else {
         return false;
     };
@@ -231,19 +294,38 @@ fn is_pr_commit(subject: &str) -> bool {
     !number.is_empty() && number.chars().all(|ch| ch.is_ascii_digit())
 }
 
-/// 원격이 GitHub이면 `https://github.com/<owner>/<repo>`. 원격이 없거나 GitHub가 아니면 `None`입니다.
-fn remote_web_url(remote: &str) -> Option<String> {
-    let url = git(&["remote", "get-url", remote]).ok()?;
-    github_web_url(url.trim())
+/// 원격이 GitHub이면 `https://github.com/<owner>/<repo>`, GitHub가 아니거나 기본 원격이 없으면 `None`입니다.
+/// `--remote`로 직접 고른 원격이 없으면 오류입니다.
+fn remote_web_url(remote: &str, given: bool) -> Result<Option<String>, ConnectorError> {
+    match git(&["remote", "get-url", remote]) {
+        Ok(url) => Ok(github_web_url(url.trim())),
+        Err(_) if !given => Ok(None),
+        Err(_) => Err(ConnectorError::new(
+            "usage",
+            format!("원격 '{remote}'가 없습니다."),
+        )),
+    }
 }
 
 fn github_web_url(url: &str) -> Option<String> {
+    // https://user:token@github.com/... 처럼 인증 정보가 든 주소도 읽습니다.
+    let url = match url.split_once("://") {
+        Some((scheme, rest)) => {
+            let host_end = rest.find('/').unwrap_or(rest.len());
+            match rest[..host_end].rfind('@') {
+                Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
+                None => url.to_string(),
+            }
+        }
+        None => url.to_string(),
+    };
     let path = url
         .strip_prefix("https://github.com/")
         .or_else(|| url.strip_prefix("http://github.com/"))
         .or_else(|| url.strip_prefix("git@github.com:"))
-        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
-    let path = path.trim_end_matches('/').trim_end_matches(".git");
+        .or_else(|| url.strip_prefix("ssh://github.com/"))?;
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
     let mut parts = path.split('/');
     let (owner, repo) = (parts.next()?, parts.next()?);
     (parts.next().is_none() && !owner.is_empty() && !repo.is_empty())
@@ -294,6 +376,8 @@ mod tests {
         assert!(!is_pr_commit("feat: 태그 필터"));
         assert!(!is_pr_commit("feat: (#) "));
         assert!(!is_pr_commit("feat: (#2a)"));
+        assert!(is_pr_commit("Merge pull request #7 from a/b"));
+        assert!(!is_pr_commit("Merge branch 'main'"));
     }
 
     #[test]
@@ -310,6 +394,14 @@ mod tests {
                 "{url}"
             );
         }
+        assert_eq!(
+            github_web_url("https://user:token@github.com/o/r.git").as_deref(),
+            Some("https://github.com/o/r")
+        );
+        assert_eq!(
+            github_web_url("https://github.com/o/x.git.git").as_deref(),
+            Some("https://github.com/o/x.git")
+        );
         assert_eq!(github_web_url("https://gitlab.com/a/b.git"), None);
         assert_eq!(github_web_url("https://github.com/a"), None);
     }
