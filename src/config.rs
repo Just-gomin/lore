@@ -19,9 +19,20 @@ pub struct Config {
     pub channels: Vec<Channel>,
     /// 어떤 스펙에도 속하지 않아도 되는 파일의 글롭. 매핑 누락 검사에서 뺀다.
     pub ignore: Vec<String>,
+    /// 정적 분석 설정. 없으면 분석하지 않는다.
+    pub analysis: Option<Analysis>,
     /// 판단이 드는 검사가 볼 파일의 글롭. 없으면 전체, 빈 목록이면 아무 파일도 보지 않는다.
     /// `lore init`을 마친 모듈부터 검사를 켜기 위해서다.
     pub scope: Option<Vec<String>>,
+}
+
+/// `analysis` 항목. `language`가 있어야 분석한다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Analysis {
+    /// `typescript`: TypeScript와 JavaScript를 함께 읽는다.
+    pub language: String,
+    /// `pnpm`이면 워크스페이스의 패키지 이름을 레포 안의 파일로 해석한다.
+    pub workspace: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +90,13 @@ struct RawConfig {
     channels: Vec<RawChannel>,
     #[serde(default)]
     check: RawCheck,
+    analysis: Option<RawAnalysis>,
+}
+
+#[derive(Deserialize)]
+struct RawAnalysis {
+    language: Option<String>,
+    workspace: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -184,12 +202,38 @@ fn parse(root: &Path, text: &str) -> Result<Config, LoreError> {
         }
     }
 
+    let analysis = match raw.analysis {
+        None | Some(RawAnalysis { language: None, .. }) => None,
+        Some(RawAnalysis {
+            language: Some(language),
+            workspace,
+        }) => {
+            if language != "typescript" {
+                return Err(invalid(format!(
+                    "analysis.language '{language}'는 지원하지 않습니다. typescript여야 합니다."
+                )));
+            }
+            if let Some(workspace) = &workspace
+                && workspace != "pnpm"
+            {
+                return Err(invalid(format!(
+                    "analysis.workspace '{workspace}'는 지원하지 않습니다. pnpm이어야 합니다."
+                )));
+            }
+            Some(Analysis {
+                language,
+                workspace,
+            })
+        }
+    };
+
     Ok(Config {
         root: root.to_path_buf(),
         docs,
         channels,
         ignore: raw.check.ignore,
         scope: raw.check.scope,
+        analysis,
     })
 }
 
@@ -254,6 +298,35 @@ mod tests {
             config("version: 1\ncheck:\n  scope: ['a/[b']\n"),
             Err(LoreError::InvalidConfig { .. })
         ));
+    }
+
+    #[test]
+    fn analysis는_language가_있을_때만_켜고_모르는_값은_오류다() {
+        let on =
+            config("version: 1\nanalysis:\n  language: typescript\n  workspace: pnpm\n").unwrap();
+        assert_eq!(
+            on.analysis,
+            Some(Analysis {
+                language: "typescript".to_string(),
+                workspace: Some("pnpm".to_string()),
+            })
+        );
+        assert_eq!(config("version: 1\n").unwrap().analysis, None);
+        assert_eq!(
+            config("version: 1\nanalysis:\n  workspace: pnpm\n")
+                .unwrap()
+                .analysis,
+            None
+        );
+        for text in [
+            "version: 1\nanalysis:\n  language: rust\n",
+            "version: 1\nanalysis:\n  language: typescript\n  workspace: yarn\n",
+        ] {
+            assert!(
+                matches!(config(text), Err(LoreError::InvalidConfig { .. })),
+                "{text}"
+            );
+        }
     }
 
     #[test]

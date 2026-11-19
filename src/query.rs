@@ -39,9 +39,11 @@ fn ensure_fresh(config: &Config) -> Result<bool, LoreError> {
     if path.exists() {
         let conn = db::open(&path)?;
         let schema = db::read_meta(&conn, "schema_version");
+        let version = db::read_meta(&conn, "lore_version");
         let fingerprint = db::read_meta(&conn, "fingerprint");
         drop(conn);
         if schema.as_deref() == Some(db::SCHEMA_VERSION)
+            && version.as_deref() == Some(db::LORE_VERSION)
             && fingerprint == Some(build::fingerprint(&config.root)?)
         {
             return Ok(false);
