@@ -22,6 +22,7 @@ fn main() -> ExitCode {
         let lang = extra
             .string("lang")?
             .unwrap_or_else(|| DEFAULT_LANG.to_string());
+        extra.finish()?;
         if lang.is_empty()
             || !lang
                 .chars()

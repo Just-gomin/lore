@@ -116,6 +116,49 @@ fn 소스_노트_스킬의_입력_예시는_입력_검사를_통과한다() {
     let examples = code_blocks(text, "json");
     assert_eq!(examples.len(), 1);
     lore::add_source::parse_input("lore-source", &examples[0]).unwrap();
+    // 추출기 예시는 표준 입력으로 넘기는 JSON이다. 추출기가 받는 항목만 쓰고, 기본 설정에 등록된 추출기를 부른다.
+    let config = include_str!("../templates/lore.config.yaml");
+    let line = code_blocks(text, "sh")
+        .iter()
+        .flat_map(|block| {
+            block
+                .lines()
+                .map(|line| line.trim().to_string())
+                .collect::<Vec<_>>()
+        })
+        .find(|line| line.starts_with("echo '") && line.contains("| lore-extractor-"))
+        .expect("추출기 예시가 있다");
+    let (json, command) = line
+        .strip_prefix("echo '")
+        .and_then(|rest| rest.split_once("' | "))
+        .expect("echo '<JSON>' | <추출기> 꼴");
+    assert!(
+        config.contains(&format!("command: {command}")),
+        "{command}는 기본 설정에 없습니다"
+    );
+    let input: serde_json::Map<String, serde_json::Value> = serde_json::from_str(json).unwrap();
+    for key in ["file", "channel", "origin"] {
+        assert!(
+            input.get(key).is_some_and(|value| value.is_string()),
+            "{key}"
+        );
+    }
+    let known = [
+        "file",
+        "channel",
+        "origin",
+        "kind",
+        "title",
+        "occurred_at",
+        "lang",
+        "max_rows",
+    ];
+    for key in input.keys() {
+        assert!(
+            known.contains(&key.as_str()),
+            "추출기가 받지 않는 항목: {key}"
+        );
+    }
 }
 
 #[test]

@@ -49,7 +49,8 @@ impl Extra {
         }
     }
 
-    fn finish(self) -> Result<(), ConnectorError> {
+    /// 꺼내 가지 않은 항목이 있으면 `invalid_input`입니다. 오래 걸리는 일 전에 불러 모르는 항목을 먼저 알립니다.
+    pub fn finish(&mut self) -> Result<(), ConnectorError> {
         match self.0.keys().next() {
             None => Ok(()),
             Some(key) => Err(invalid(format!("모르는 항목 '{key}'가 있습니다."))),
@@ -247,7 +248,7 @@ mod tests {
         assert_eq!(error.code, "invalid_input");
         assert!(error.message.contains("origin"));
 
-        let (_, extra) =
+        let (_, mut extra) =
             parse_input(r#"{"file": "a.md", "channel": "memo", "origin": "x", "lang": "eng"}"#)
                 .unwrap();
         assert_eq!(extra.finish().unwrap_err().code, "invalid_input");

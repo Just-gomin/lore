@@ -17,6 +17,7 @@ const MAX_ROWS: usize = 500;
 fn main() -> ExitCode {
     extractor::run(|_, extra, bytes| {
         let max_rows = extra.count("max_rows")?.unwrap_or(MAX_ROWS);
+        extra.finish()?;
         extract(bytes, max_rows)
     })
 }
