@@ -9,8 +9,8 @@ use std::process::{Command, ExitCode};
 use clap::{Arg, ArgAction};
 use globset::{GlobBuilder, GlobMatcher};
 use lore_connector_common::{
-    Candidate, ConnectorError, OriginVersion, candidates_json, error_json, origins_json,
-    read_source_origins,
+    Candidate, ConnectorError, OriginVersion, candidates_json, error_json, github_web_url,
+    origins_json, read_source_origins,
 };
 
 const CHANNEL: &str = "channel";
@@ -307,31 +307,6 @@ fn remote_web_url(remote: &str, given: bool) -> Result<Option<String>, Connector
     }
 }
 
-fn github_web_url(url: &str) -> Option<String> {
-    // https://user:token@github.com/... 처럼 인증 정보가 든 주소도 읽습니다.
-    let url = match url.split_once("://") {
-        Some((scheme, rest)) => {
-            let host_end = rest.find('/').unwrap_or(rest.len());
-            match rest[..host_end].rfind('@') {
-                Some(at) => format!("{scheme}://{}", &rest[at + 1..]),
-                None => url.to_string(),
-            }
-        }
-        None => url.to_string(),
-    };
-    let path = url
-        .strip_prefix("https://github.com/")
-        .or_else(|| url.strip_prefix("http://github.com/"))
-        .or_else(|| url.strip_prefix("git@github.com:"))
-        .or_else(|| url.strip_prefix("ssh://github.com/"))?;
-    let path = path.trim_end_matches('/');
-    let path = path.strip_suffix(".git").unwrap_or(path);
-    let mut parts = path.split('/');
-    let (owner, repo) = (parts.next()?, parts.next()?);
-    (parts.next().is_none() && !owner.is_empty() && !repo.is_empty())
-        .then(|| format!("https://github.com/{owner}/{repo}"))
-}
-
 /// 이 커넥터가 맡는 원본(`git:`와 GitHub 커밋 주소)의 판. 커밋은 바뀌지 않으므로 적힌 판 그대로입니다.
 fn origins(docs: &Path) -> Result<Vec<OriginVersion>, ConnectorError> {
     Ok(read_source_origins(docs)?
@@ -378,32 +353,6 @@ mod tests {
         assert!(!is_pr_commit("feat: (#2a)"));
         assert!(is_pr_commit("Merge pull request #7 from a/b"));
         assert!(!is_pr_commit("Merge branch 'main'"));
-    }
-
-    #[test]
-    fn github_원격_주소를_웹_주소로_바꾼다() {
-        for url in [
-            "https://github.com/Just-gomin/lore.git",
-            "https://github.com/Just-gomin/lore",
-            "git@github.com:Just-gomin/lore.git",
-            "ssh://git@github.com/Just-gomin/lore.git",
-        ] {
-            assert_eq!(
-                github_web_url(url).as_deref(),
-                Some("https://github.com/Just-gomin/lore"),
-                "{url}"
-            );
-        }
-        assert_eq!(
-            github_web_url("https://user:token@github.com/o/r.git").as_deref(),
-            Some("https://github.com/o/r")
-        );
-        assert_eq!(
-            github_web_url("https://github.com/o/x.git.git").as_deref(),
-            Some("https://github.com/o/x.git")
-        );
-        assert_eq!(github_web_url("https://gitlab.com/a/b.git"), None);
-        assert_eq!(github_web_url("https://github.com/a"), None);
     }
 
     #[test]

@@ -1,0 +1,16 @@
+[
+  {
+    "user": {
+      "login": "lead"
+    },
+    "state": "APPROVED",
+    "body": "좋습니다"
+  },
+  {
+    "user": {
+      "login": "bot"
+    },
+    "state": "COMMENTED",
+    "body": ""
+  }
+]

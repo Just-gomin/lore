@@ -1,0 +1,17 @@
+[package]
+name = "lore-connector-github"
+version.workspace = true
+edition.workspace = true
+description = "GitHub PR과 이슈에서 lore 소스 노트 후보를 뽑는 커넥터"
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+chrono.workspace = true
+clap.workspace = true
+lore-connector-common = { path = "../common" }
+serde_json.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

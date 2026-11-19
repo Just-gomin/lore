@@ -93,13 +93,17 @@
 
 ### 3. GitHub 커넥터
 
-- [ ] `lore-connector-github --channel <ID>`: 병합된 PR과 닫힌 이슈를 후보로 냅니다. 레포는 `--repo <owner/name>`이고, 없으면 `origin` 원격에서 읽습니다.
+- [x] `lore-connector-github --channel <ID>`: 병합된 PR과 닫힌 이슈를 후보로 냅니다. 레포는 `--repo <owner/name>`이고, 없으면 `origin` 원격에서 읽습니다.
   - PR의 `text`는 제목, 본문, 대화 코멘트, 리뷰 코멘트입니다. 이슈의 `text`는 제목, 본문, 코멘트입니다.
   - `kind`는 `discussion`입니다. `occurred_at`은 PR이면 병합한 날, 이슈면 닫은 날입니다. `origin`은 웹 주소입니다.
   - `origin_version`은 `text`의 SHA-256입니다. GitHub의 마지막 수정 시각은 라벨이나 봇 활동에도 바뀌어, 신선도 검사가 내용과 상관없이 실패하기 때문입니다.
-- [ ] GitHub 호출은 `gh api --paginate`로 합니다. 인증은 `gh`가 맡습니다(기획서 5장의 "인증은 그 도구가 맡음"). `--since`, `--limit`, `--state`로 범위를 좁힙니다.
-- [ ] `--origins`: 소스 노트의 `origin` 중 PR과 이슈 주소만 맡아(커밋 주소는 git 커넥터) 지금 `text`의 해시를 냅니다.
-- [ ] 네트워크 없이 시험하도록 `gh` 대신 고정 응답 파일을 읽는 `--fixture <폴더>`를 둡니다.
+- [x] GitHub 호출은 `gh api --paginate`로 합니다. 인증은 `gh`가 맡습니다(기획서 5장의 "인증은 그 도구가 맡음"). `--since`, `--limit`, `--include pulls|issues`(여러 번)로 범위를 좁힙니다.
+- [x] `--origins`: 소스 노트의 `origin` 중 PR과 이슈 주소만 맡아(커밋 주소는 git 커넥터) 지금 `text`의 해시를 냅니다.
+- [x] 네트워크 없이 시험하도록 `gh` 대신 고정 응답 파일을 읽는 `--fixture <폴더>`를 둡니다.
+
+정한 것: 원문(`text`)은 제목, 본문, 코멘트, 리뷰(리뷰 본문은 상태, 리뷰 코멘트는 파일 경로를 덧붙임) 순서로 이어 붙이고, 본문이 빈 코멘트는 뺍니다. 코멘트의 날짜는 넣지 않습니다. `--origins`는 아직 병합하거나 닫지 않은 PR과 이슈도 원문을 다시 만들어 비교하고, 읽지 못한 원본은 빼서 `lore check`의 확인하지 못한 건수로 나오게 합니다.
+
+확인: lore 레포의 임시 복사본에서 이 커넥터로 PR #33을 후보로 뽑아 `lore add source`로 소스 노트를 만들었습니다. `--origins docs`의 출력을 `lore check --origins`에 넘기자 그 노트가 비교되어 신선도가 통과했습니다(`unchecked` 없음). 노트의 판을 바꾸면 `stale_source`로 실패했습니다.
 
 완료 기준: 고정 응답으로 후보 목록과 최신 판 목록이 기대한 값과 같습니다. 연습 레포의 임시 복사본에 PR에서 만든 소스 노트를 두고, 이 커넥터의 출력을 `lore check --origins`에 넘기면 그 노트가 실제로 비교됩니다(`unchecked`가 소스 노트 수보다 적음).
 

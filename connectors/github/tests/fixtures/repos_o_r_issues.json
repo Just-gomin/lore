@@ -1,0 +1,22 @@
+[
+  {
+    "number": 3,
+    "title": "재시도를 5회로",
+    "html_url": "https://github.com/o/r/pull/3",
+    "merged_at": "2026-11-10T23:30:00Z",
+    "closed_at": "2026-11-10T23:30:00Z",
+    "created_at": "2026-11-09T00:00:00Z",
+    "body": "고객 요청으로 늘립니다.\r\n",
+    "pull_request": {
+      "url": "x"
+    }
+  },
+  {
+    "number": 5,
+    "title": "중복 결제",
+    "html_url": "https://github.com/o/r/issues/5",
+    "closed_at": "2026-11-05T12:00:00Z",
+    "created_at": "2026-11-04T00:00:00Z",
+    "body": "야간 정산에서 중복 결제"
+  }
+]
