@@ -29,27 +29,34 @@ fn import를_파일_의존으로_만들고_문법_오류와_미해석은_보고�
     assert_eq!(
         report["analysis"],
         serde_json::json!({
-            "files": 6,
-            "edges": 6,
+            "files": 9,
+            "edges": 10,
             "parse_errors": ["services/notification/broken.ts"],
-            "unresolved": 1,
+            "unresolved": 2,
         })
     );
     // 레포 밖 패키지(node:fs)는 엣지도 만들지 않고 세지도 않는다.
     assert_eq!(
         analysis_edges(dir.path()),
         [
+            // 워크스페이스 패키지 안에서 패키지의 tsconfig 별칭(baseUrl 기준)을 따른다.
+            "packages/money/src/index.ts -> packages/money/src/lib/round.ts",
             "scripts/seed.mjs -> services/notification/alert.ts",
             "services/notification/alert.ts -> services/payment/core/index.ts",
             // 문법 오류가 난 곳 밖의 import는 그대로 쓴다.
             "services/notification/broken.ts -> services/notification/alert.ts",
+            // 루트 tsconfig의 `@/*`와 `@core` 별칭
+            "services/notification/format.ts -> services/payment/core/index.ts",
+            "services/notification/format.ts -> services/payment/core/types.ts",
+            // 워크스페이스 패키지 이름. exports의 import 조건을 따른다.
+            "services/payment/core/charge.ts -> packages/money/src/index.ts",
             "services/payment/core/charge.ts -> services/payment/core/types.ts",
             "services/payment/core/index.ts -> services/payment/core/charge.ts",
             "services/payment/core/index.ts -> services/payment/core/types.ts",
         ]
     );
-    // 스펙에 속하지 않은 scripts/seed.mjs도 노드가 된다. 분석한 파일 6개에 스펙이 맡는 alert.css를 더해 7개다.
-    assert_eq!(report["nodes"]["file"], 7);
+    // 스펙에 속하지 않은 scripts/, packages/의 파일도 노드가 된다. 분석한 파일 9개에 스펙이 맡는 alert.css를 더해 10개다.
+    assert_eq!(report["nodes"]["file"], 10);
 }
 
 #[test]
@@ -75,7 +82,7 @@ fn 사람용_출력에_분석_결과를_보여_준다() {
     let dir = repo("analysis");
     let text = common::stdout(&lore_in(dir.path(), &["build", "--for-human"]));
     assert!(
-        text.contains("  분석    파일 6개, 의존 6개, 해석하지 못한 import 1개\n    문법 오류  services/notification/broken.ts"),
+        text.contains("  분석    파일 9개, 의존 10개, 해석하지 못한 import 2개\n    문법 오류  services/notification/broken.ts"),
         "{text}"
     );
 }

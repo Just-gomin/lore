@@ -9,6 +9,8 @@ use std::path::Path;
 use serde::Serialize;
 use tree_sitter::{Language, Node, Parser};
 
+use crate::resolve::{Resolution, Resolver};
+
 /// 분석하는 확장자. `.d.ts`는 선언만 있어 뺀다.
 const EXTENSIONS: [&str; 8] = ["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
 
@@ -49,14 +51,14 @@ fn extension(path: &str) -> Option<&str> {
     Some(ext)
 }
 
-/// git이 추적하는 파일 중 분석할 파일의 import를 읽는다.
-pub fn analyze(root: &Path, tracked: &[String]) -> Analysis {
+/// git이 추적하는 파일 중 분석할 파일의 import를 읽는다. `workspace`면 pnpm 워크스페이스 패키지도 해석한다.
+pub fn analyze(root: &Path, tracked: &[String], workspace: bool) -> Analysis {
     let files: Vec<String> = tracked
         .iter()
         .filter(|path| is_source(path))
         .cloned()
         .collect();
-    let known: HashSet<&str> = tracked.iter().map(String::as_str).collect();
+    let resolver = Resolver::new(root, tracked, workspace);
     let mut report = AnalysisReport {
         files: files.len(),
         ..AnalysisReport::default()
@@ -76,18 +78,13 @@ pub fn analyze(root: &Path, tracked: &[String]) -> Analysis {
             report.parse_errors.push(file.clone());
         }
         for specifier in specifiers {
-            match classify(&specifier) {
-                Specifier::Relative => match resolve_relative(file, &specifier, &known) {
-                    Some(target) if target != *file => {
-                        edges.insert((file.clone(), target));
-                    }
-                    Some(_) => {}
-                    // CSS, JSON, 이미지처럼 코드가 아닌 추적 파일을 가져온 것은 해석한 것으로 보고 엣지는 만들지 않는다.
-                    None if is_tracked_asset(file, &specifier, &known) => {}
-                    None => report.unresolved += 1,
-                },
-                // 별칭과 워크스페이스 패키지는 2번에서 해석한다. 지금은 레포 밖 패키지와 같이 본다.
-                Specifier::Bare => {}
+            match resolver.resolve(file, &specifier) {
+                Resolution::File(target) if target != *file => {
+                    edges.insert((file.clone(), target));
+                }
+                // CSS, JSON, 이미지처럼 코드가 아닌 추적 파일과 레포 밖 패키지는 엣지를 만들지 않는다.
+                Resolution::File(_) | Resolution::Asset | Resolution::External => {}
+                Resolution::Unresolved => report.unresolved += 1,
             }
         }
     }
@@ -194,40 +191,10 @@ fn string_value(node: Node, source: &[u8]) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-enum Specifier {
-    /// `./`, `../`로 시작
-    Relative,
-    /// 그 밖의 것. 별칭, 워크스페이스 패키지, 레포 밖 패키지
-    Bare,
-}
-
-fn classify(specifier: &str) -> Specifier {
-    if specifier.starts_with("./")
-        || specifier.starts_with("../")
-        || specifier == "."
-        || specifier == ".."
-    {
-        Specifier::Relative
-    } else {
-        Specifier::Bare
-    }
-}
-
-/// 상대 경로를 git이 추적하는 파일에 잇는다. TypeScript의 `bundler` 해석(`allowJs`)과 같은 규칙이다.
-fn resolve_relative(from: &str, specifier: &str, known: &HashSet<&str>) -> Option<String> {
-    let dir = from.rsplit_once('/').map_or("", |(dir, _)| dir);
-    let joined = normalize(&format!("{dir}/{specifier}"))?;
-    // `./lib/`처럼 `/`로 끝나면 폴더만 찾는다.
-    if specifier.ends_with('/') {
-        return resolve_index(&joined, known);
-    }
-    resolve_path(&joined, known)
-}
-
 const BARE: [&str; 4] = [".ts", ".tsx", ".js", ".jsx"];
 
 /// 폴더의 `index` 파일.
-fn resolve_index(dir: &str, known: &HashSet<&str>) -> Option<String> {
+pub(crate) fn resolve_index(dir: &str, known: &HashSet<&str>) -> Option<String> {
     BARE.iter()
         .map(|ext| {
             if dir.is_empty() {
@@ -237,11 +204,6 @@ fn resolve_index(dir: &str, known: &HashSet<&str>) -> Option<String> {
             }
         })
         .find(|candidate| known.contains(candidate.as_str()))
-}
-
-fn is_tracked_asset(from: &str, specifier: &str, known: &HashSet<&str>) -> bool {
-    let dir = from.rsplit_once('/').map_or("", |(dir, _)| dir);
-    normalize(&format!("{dir}/{specifier}")).is_some_and(|path| known.contains(path.as_str()))
 }
 
 /// 확장자를 보충하고 폴더의 `index`를 찾아 파일에 잇는다.
@@ -278,7 +240,7 @@ pub(crate) fn resolve_path(path: &str, known: &HashSet<&str>) -> Option<String> 
 }
 
 /// `.`과 `..`를 풀어 프로젝트 홈 기준 경로로 만든다. 홈 밖으로 나가면 `None`이다.
-fn normalize(path: &str) -> Option<String> {
+pub(crate) fn normalize(path: &str) -> Option<String> {
     let mut parts: Vec<&str> = Vec::new();
     for part in path.split('/') {
         match part {
@@ -296,21 +258,26 @@ fn normalize(path: &str) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn known(files: &[&'static str]) -> HashSet<&'static str> {
-        files.iter().copied().collect()
+    fn resolve_in(tracked: &[&str], from: &str, spec: &str) -> Option<String> {
+        let tracked: Vec<String> = tracked.iter().map(|path| path.to_string()).collect();
+        let resolver = Resolver::new(Path::new("/nonexistent"), &tracked, false);
+        match resolver.resolve(from, spec) {
+            Resolution::File(file) => Some(file),
+            _ => None,
+        }
     }
 
     #[test]
     fn 상대_경로는_bundler_해석대로_파일에_잇는다() {
-        let files = known(&[
+        let files = [
             "src/a.ts",
             "src/b.tsx",
             "src/lib/index.ts",
             "src/util.js",
             "src/types.ts",
             "src/m.mts",
-        ]);
-        let resolve = |from: &str, spec: &str| resolve_relative(from, spec, &files);
+        ];
+        let resolve = |from: &str, spec: &str| resolve_in(&files, from, spec);
         assert_eq!(resolve("src/x.ts", "./a").as_deref(), Some("src/a.ts"));
         assert_eq!(resolve("src/x.ts", "./b").as_deref(), Some("src/b.tsx"));
         assert_eq!(
@@ -318,6 +285,10 @@ mod tests {
             Some("src/lib/index.ts")
         );
         assert_eq!(resolve("src/lib/y.ts", "..").as_deref(), None);
+        assert_eq!(
+            resolve("src/lib/y.ts", ".").as_deref(),
+            Some("src/lib/index.ts")
+        );
         assert_eq!(
             resolve("src/x.ts", "./util.js").as_deref(),
             Some("src/util.js")
@@ -331,18 +302,22 @@ mod tests {
         assert_eq!(resolve("src/x.ts", "../../../etc"), None);
         assert_eq!(resolve("src/x.ts", "./none"), None);
         // `/`로 끝나면 같은 이름의 파일보다 폴더의 index를 찾는다.
-        let files = known(&["src/lib.ts", "src/lib/index.ts", "src/types.d.ts"]);
+        let files = ["src/lib.ts", "src/lib/index.ts", "src/types.d.ts"];
         assert_eq!(
-            resolve_relative("src/x.ts", "./lib/", &files).as_deref(),
+            resolve_in(&files, "src/x.ts", "./lib/").as_deref(),
             Some("src/lib/index.ts")
         );
         assert_eq!(
-            resolve_relative("src/x.ts", "./lib", &files).as_deref(),
+            resolve_in(&files, "src/x.ts", "./lib").as_deref(),
             Some("src/lib.ts")
         );
         // 분석하지 않는 선언 파일로는 잇지 않는다.
-        assert_eq!(resolve_relative("src/x.ts", "./types.d", &files), None);
-        assert!(matches!(classify(".."), Specifier::Relative));
+        assert_eq!(resolve_in(&files, "src/x.ts", "./types.d"), None);
+        // `.`, `..`은 폴더를 가리킨다. TypeScript와 Node처럼 같은 이름의 파일보다 폴더의 index를 찾는다.
+        assert_eq!(
+            resolve_in(&files, "src/lib/inner/y.ts", "..").as_deref(),
+            Some("src/lib/index.ts")
+        );
     }
 
     #[test]

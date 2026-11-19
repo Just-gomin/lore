@@ -21,6 +21,7 @@ pub mod install;
 pub mod output;
 pub mod query;
 pub mod report;
+pub mod resolve;
 pub mod source;
 pub mod sync;
 pub mod why;

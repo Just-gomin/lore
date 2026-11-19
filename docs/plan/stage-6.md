@@ -71,10 +71,14 @@
 
 ### 2. 별칭과 워크스페이스
 
-- [ ] `tsconfig.json`의 `compilerOptions.baseUrl`과 `paths`로 별칭(예: `@/*`)을 해석합니다. import하는 파일에서 위로 올라가며 가장 가까운 `tsconfig.json`을 씁니다. 워크스페이스 패키지마다 자기 `tsconfig.json`이 있기 때문입니다. `tsconfig.json`은 주석과 끝 쉼표를 허용하는 JSONC라 JSON5 파서(`json5` 크레이트)로 읽습니다. `extends`는 레포 안의 파일만 따라갑니다.
-- [ ] `analysis.workspace: pnpm`이면 `pnpm-workspace.yaml`의 `packages`와 각 패키지의 `package.json`(`name`, `exports`의 문자열 값, `main`)으로 패키지 이름을 레포 안의 파일로 해석합니다.
+- [x] `tsconfig.json`의 `compilerOptions.baseUrl`과 `paths`로 별칭(예: `@/*`)을 해석합니다. import하는 파일에서 위로 올라가며 가장 가까운 `tsconfig.json`을 씁니다. 워크스페이스 패키지마다 자기 `tsconfig.json`이 있기 때문입니다. `tsconfig.json`은 주석과 끝 쉼표를 허용하는 JSONC라 JSON5 파서(`json5` 크레이트)로 읽습니다. `extends`는 레포 안의 파일만 따라갑니다.
+- [x] `analysis.workspace: pnpm`이면 `pnpm-workspace.yaml`의 `packages`와 각 패키지의 `package.json`(`name`, `exports`의 문자열 값, `main`)으로 패키지 이름을 레포 안의 파일로 해석합니다.
 
 완료 기준: 분석용 고정 예제의 별칭과 워크스페이스 패키지 import가 기대한 파일로 해석됩니다. 블로그에서 `@/features/...` import가 모두 파일로 해석되어 해석하지 못한 import가 0건입니다.
+
+정한 것: 별칭은 TypeScript처럼 `*` 앞부분이 가장 긴 `paths` 패턴을 씁니다. `paths`의 대상은 `baseUrl`이 있으면 그 기준, 없으면 `paths`를 적은 파일의 폴더 기준입니다. 자식 `tsconfig.json`의 `paths`는 부모의 것을 통째로 바꿉니다. `baseUrl`이 있으면 별칭에 맞지 않는 맨 이름도 그 폴더 기준으로 먼저 찾습니다. 별칭이나 패키지 이름에 맞았는데 파일에 잇지 못하면 해석하지 못한 import로 셉니다. `exports`의 조건은 `import`, `default`, `require` 순서로 고르고 안쪽 조건까지 따라가며, `types`와 `null`은 쓰지 않습니다. 하위 경로 패턴은 Node처럼 `*` 앞부분이 가장 긴 것을 씁니다. 별칭 패턴은 글자 그대로 맞는 것이 먼저입니다. `*` 하나뿐인 패턴에 맞았는데 파일에 잇지 못하면 TypeScript처럼 레포 밖 패키지로 봅니다. `tsconfig.json`은 git이 추적하는 것만 읽고, 깨졌으면 위 폴더의 설정을 씁니다. TypeScript 5의 배열 `extends`와, `paths` 없이 `references`만 둔 설정(Vite)도 읽습니다. `.`, `..`, `/`로 끝나는 경로는 폴더의 `index`를 찾습니다.
+
+확인: 블로그에서 `@/` 별칭 import가 모두 해석되어 파일 → 파일 의존이 23개에서 30개가 되고, 해석하지 못한 import는 0개였습니다. 그중 `features/note/components/TagFilter.tsx → features/common/components/index.ts`가 `note`에서 `common`으로 가는 의존입니다.
 
 정해야 할 것: 워크스페이스 패키지의 `exports`, `main`이 git이 추적하지 않는 빌드 결과(`dist/` 등)를 가리킬 때 소스 파일로 되짚을지. 2번에서는 해석하지 못한 import로 세고, 진행 중인 프로젝트에서 얼마나 나오는지 보고 정합니다.
 

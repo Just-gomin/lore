@@ -1,0 +1,9 @@
+{
+  // 별칭. Next.js의 tsconfig처럼 주석과 끝 쉼표가 있다.
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./*"],
+      "@core": ["./services/payment/core/index.ts"],
+    },
+  },
+}
