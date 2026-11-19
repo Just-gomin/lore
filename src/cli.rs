@@ -86,8 +86,8 @@ pub enum Invocation {
 pub enum Request {
     Build,
     Check {
-        /// 원본의 최신 판 목록 파일.
-        origins: Option<String>,
+        /// 원본의 최신 판 목록 파일. 여러 개를 받아 합칩니다.
+        origins: Vec<String>,
         /// 바뀐 파일을 구할 비교 기준 ref.
         base: Option<String>,
         /// PR 설명을 담은 파일.
@@ -136,7 +136,12 @@ impl Request {
         match command {
             Command::Build => Request::Build,
             Command::Check => Request::Check {
-                origins: matches.get_one::<String>(ORIGINS).cloned(),
+                origins: matches
+                    .get_many::<String>(ORIGINS)
+                    .into_iter()
+                    .flatten()
+                    .cloned()
+                    .collect(),
                 base: matches.get_one::<String>(BASE).cloned(),
                 pr_body: matches.get_one::<String>(PR_BODY).cloned(),
                 report: matches.get_flag(REPORT),
@@ -335,7 +340,12 @@ fn with_arguments(command: Command, definition: clap::Command) -> clap::Command 
                     .default_values(TRAVERSABLE.map(EdgeKind::name)),
             ),
         Command::Check => definition
-            .arg(Arg::new(ORIGINS).long(ORIGINS).value_name("JSON 파일"))
+            .arg(
+                Arg::new(ORIGINS)
+                    .long(ORIGINS)
+                    .value_name("JSON 파일")
+                    .action(ArgAction::Append),
+            )
             .arg(Arg::new(BASE).long(BASE).value_name("ref"))
             .arg(Arg::new(PR_BODY).long(PR_BODY).value_name("파일"))
             .arg(Arg::new(REPORT).long(REPORT).action(ArgAction::SetTrue)),
@@ -491,7 +501,7 @@ mod tests {
                 Command::Check => (
                     vec!["check"],
                     Request::Check {
-                        origins: None,
+                        origins: Vec::new(),
                         base: None,
                         pr_body: None,
                         report: false,

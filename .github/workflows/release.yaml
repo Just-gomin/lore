@@ -55,15 +55,24 @@ jobs:
       - name: "Build"
         run: |
           rustup target add "${{ matrix.target }}"
-          cargo build --release --locked --target "${{ matrix.target }}"
+          cargo build --workspace --release --locked --target "${{ matrix.target }}"
 
       - name: "Upload"
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET: ${{ matrix.target }}
+        # 코어와 커넥터를 실행 파일마다 따로 묶습니다. 설치한 워크플로는 lore 하나만 받습니다.
         run: |
-          tar -czf "lore-${TARGET}.tar.gz" -C "target/${TARGET}/release" lore
-          gh release upload "${GITHUB_REF_NAME}" "lore-${TARGET}.tar.gz" --clobber
+          bins="$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].targets[] | select(.kind | index("bin")) | .name')"
+          # 설치한 워크플로가 받는 lore가 빠지면 게시하지 않습니다.
+          if ! printf '%s\n' "${bins}" | grep -qx lore; then
+            echo "실행 파일 목록에 lore가 없습니다: ${bins}" >&2
+            exit 1
+          fi
+          for bin in ${bins}; do
+            tar -czf "${bin}-${TARGET}.tar.gz" -C "target/${TARGET}/release" "${bin}"
+            gh release upload "${GITHUB_REF_NAME}" "${bin}-${TARGET}.tar.gz" --clobber
+          done
 
   publish:
     needs: build

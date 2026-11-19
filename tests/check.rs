@@ -750,3 +750,34 @@ fn 보고의_사람용_출력은_검사_결과_뒤에_붙는다() {
         "{text}"
     );
 }
+
+#[test]
+fn 원본_목록을_여러_파일로_주면_합쳐서_비교한다() {
+    let dir = clean_repo();
+    let write = |name: &str, entries: &[(&str, &str)]| {
+        let list: Vec<Value> = entries
+            .iter()
+            .map(|(origin, version)| serde_json::json!({"origin": origin, "origin_version": version}))
+            .collect();
+        std::fs::write(dir.path().join(name), Value::Array(list).to_string()).unwrap();
+    };
+    write("a.json", &[THREAD]);
+    write("b.json", &[MEETING]);
+    let output = lore_in(
+        dir.path(),
+        &["check", "--origins", "a.json", "--origins", "b.json"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let report = json(&output);
+    assert_eq!(status_of(&report, "freshness"), "pass");
+    assert!(check_of(&report, "freshness").get("unchecked").is_none());
+
+    // 두 파일이 같은 원본을 다른 판으로 적으면 입력 오류다.
+    write("b.json", &[MEETING, (THREAD.0, "다른 판")]);
+    let report = json(&lore_in(
+        dir.path(),
+        &["check", "--origins", "a.json", "--origins", "b.json"],
+    ));
+    assert_eq!(report["error"]["problems"][0]["code"], "duplicate_origin");
+    assert_eq!(report["error"]["problems"][0]["path"], "b.json");
+}
