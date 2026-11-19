@@ -149,12 +149,12 @@
 
 확인: 0.5.0을 릴리스(lore #55, `v0.5.0`)하고 블로그에 다시 설치했습니다(블로그 #44). 확인한 것은 다음과 같습니다.
 
-- 릴리스에 바이너리 열두 개(코어, 커넥터 둘, 추출기 셋 × 두 타깃)가 올라갔습니다.
-- macOS에서 내려받은 `lore-extractor-xlsx`는 고정 xlsx에서, `lore-extractor-markdown`은 고정 마크다운에서 후보를 냅니다.
+- 릴리스에 바이너리 열두 개(코어, 커넥터 둘, 추출기 셋, 각 두 타깃)가 올라갔습니다.
+- macOS에서 내려받은 `lore-extractor-xlsx`는 고정 xlsx와 ods에서, `lore-extractor-markdown`은 고정 마크다운에서 후보를 냅니다.
 - 이 컴퓨터에는 tesseract가 없습니다.
   - 내려받은 `lore-extractor-image`는 그래서 `tool_missing`과 설치 방법을 냅니다.
-  - 가짜 tesseract(`LORE_TESSERACT`)를 주면 고정 사진에서 EXIF 날짜(2026-11-03)와 함께 후보를 냅니다.
-  - 실제 tesseract로 읽는 것은 CI(Ubuntu, tesseract 5.5.0)의 시험으로 확인했습니다.
+  - 가짜 tesseract(`LORE_TESSERACT`)를 주면 고정 사진에서 EXIF 날짜(2026-11-03)와 함께, EXIF가 없는 `text.png`에서는 입력한 `occurred_at`으로 후보를 냅니다.
+  - 실제 tesseract로 읽는 것은 CI(Ubuntu, tesseract 5.5.0)의 시험으로 확인했습니다. macOS 바이너리와 실제 tesseract의 조합은 확인하지 못했고, 업무 프로젝트에서 단계 완료를 확인할 때 함께 봅니다.
 - 블로그는 `lore-source` 스킬과 워크플로만 바뀌었고, 포매터를 거친 뒤에도 다시 설치하면 바뀌는 파일이 없습니다(스킬 해시 일치).
 
 ## 정해야 할 것
