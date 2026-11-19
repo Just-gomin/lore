@@ -119,14 +119,16 @@
 
 완료 기준: 블로그에서 `lore build`의 `analysis`에 파싱하지 못한 파일이 없고, `lore impact features/common/components/Tag.tsx`가 `note`를 선언 근거와 추론 근거로 함께 냅니다.
 
-확인: 0.3.0을 릴리스(#45, `v0.3.0`)하고 블로그에 다시 설치했습니다(블로그 #42). 릴리스 바이너리로 블로그에서 다음을 확인했습니다.
+확인: 0.3.0을 릴리스(lore #45, `v0.3.0`)하고 블로그에 다시 설치했습니다(블로그 #42). 릴리스 바이너리로 블로그에서 다음을 확인했습니다.
 
-- `lore build`: 파일 37개, 파일 의존 30개, 해석하지 못한 import 0개, 심볼 37개, 심볼 의존 32개
+- `lore build`: 분석한 파일 37개, 파일 의존 30개, 해석하지 못한 import 0개, 심볼 37개, 심볼 의존 32개
 - `lore impact features/common/components/Tag.tsx`가 `note`를 1홉 선언(`note 의존함 common`)과 1홉 추론(`TagFilter.tsx#TagFilter 의존함 Tag.tsx#Tag`)으로 함께 냅니다.
-- 완료 기준의 "파싱하지 못한 파일이 없음"은 글자 그대로는 채우지 못했습니다. `parse_errors`에 두 파일(`features/note/components/NoteList.tsx`, `features/note/lib/notes.test.ts`)이 남습니다.
-  - 1번에서 적은 문법 크레이트의 한계(JSX 글 속의 맨 `&`, 타입 위치의 `typeof import(...)`)입니다.
-  - 두 파일 모두 읽기는 했고, 오류 밖의 import와 심볼은 그대로 씁니다. 그래서 의존과 심볼에 빠진 것은 없습니다.
-  - 문법 크레이트가 고쳐지면 다시 봅니다.
+- 완료 기준의 "파싱하지 못한 파일이 없음"은 채우지 못했습니다. `parse_errors`에 두 파일이 남습니다.
+  - `features/note/components/NoteList.tsx`는 JSX 글 속의 맨 `&`(`WHEN & WHERE`), `features/note/lib/notes.test.ts`는 타입 위치의 `typeof import("node:fs")` 때문입니다. 1번에서 적은 문법 크레이트의 한계입니다.
+  - 두 곳을 유효한 다른 표기(`{"&"}`, 타입 별칭)로 바꿔 빌드해도 노드와 엣지가 같았습니다(바뀐 것은 두 파일의 내용 해시뿐). 그래서 의존과 심볼에 빠진 것은 없습니다.
+  - 문법 크레이트의 새 판이 이를 고치면, 공통 규칙대로 문법을 올리는 PR(버전 올림)에서 다시 확인합니다.
+
+정한 것: 문법 크레이트의 한계로 남는 `parse_errors`는, 오류 없는 표기로 바꾼 빌드와 노드·엣지가 같으면 5번을 완료로 봅니다. 1번에서 이 두 파일을 알고도 완료 기준을 그대로 적었기 때문에 여기서 정합니다.
 
 ### 6. 심볼을 받는 `lore why` (#20의 답에 따라)
 
